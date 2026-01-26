@@ -205,6 +205,12 @@ class WhoopClient:
         """
         logger.info("Starting authentication")
         
+        # Check if we already have valid tokens
+        if self.auth.has_valid_tokens():
+            logger.info("Found existing valid tokens, skipping OAuth flow")
+            self._authenticated = True
+            return
+        
         self.auth.authorize(auto_open_browser=auto_open_browser)
         self._authenticated = True
         
@@ -432,36 +438,36 @@ class WhoopClient:
     # Recovery Methods
     # =========================================================================
     
-    def get_recovery(self, recovery_id: int) -> Recovery:
+    def get_recovery_for_cycle(self, cycle_id: int) -> Recovery:
         """
-        Get specific recovery record by ID.
+        Get recovery record for a specific cycle.
         
         Args:
-            recovery_id: Recovery record ID.
+            cycle_id: Cycle ID to get recovery for.
         
         Returns:
             Recovery record with score and metadata.
         
         Raises:
             WhoopAPIError: If request fails or recovery not found.
-            ValueError: If recovery_id is invalid.
+            ValueError: If cycle_id is invalid.
         
         Example:
-            >>> recovery = client.get_recovery(123456)
+            >>> recovery = client.get_recovery_for_cycle(93845)
             >>> if recovery.score:
             ...     print(f"Recovery: {recovery.score.recovery_score}%")
             ...     print(f"HRV: {recovery.score.hrv_rmssd_milli}ms")
             ...     print(f"RHR: {recovery.score.resting_heart_rate}bpm")
         """
-        if recovery_id <= 0:
-            raise ValueError(f"Invalid recovery_id: {recovery_id}")
+        if cycle_id <= 0:
+            raise ValueError(f"Invalid cycle_id: {cycle_id}")
         
         logger.info(
-            "Fetching recovery",
-            extra={"recovery_id": recovery_id}
+            "Fetching recovery for cycle",
+            extra={"cycle_id": cycle_id}
         )
         
-        endpoint = ENDPOINTS["recovery_single"].format(recovery_id=recovery_id)
+        endpoint = ENDPOINTS["recovery_for_cycle"].format(cycle_id=cycle_id)
         data = self._request("GET", endpoint)
         return Recovery(**data)
     

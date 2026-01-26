@@ -199,6 +199,12 @@ class AsyncWhoopClient:
         """
         logger.info("Starting authentication")
         
+        # Check if we already have valid tokens
+        if self.auth.has_valid_tokens():
+            logger.info("Found existing valid tokens, skipping OAuth flow")
+            self._authenticated = True
+            return
+        
         self.auth.authorize(auto_open_browser=auto_open_browser)
         self._authenticated = True
         
@@ -383,25 +389,25 @@ class AsyncWhoopClient:
     # Recovery Methods
     # =========================================================================
     
-    async def get_recovery(self, recovery_id: int) -> Recovery:
+    async def get_recovery_for_cycle(self, cycle_id: int) -> Recovery:
         """
-        Get specific recovery record by ID.
+        Get recovery record for a specific cycle.
         
         Args:
-            recovery_id: Recovery record ID.
+            cycle_id: Cycle ID to get recovery for.
         
         Returns:
             Recovery record with score and metadata.
         """
-        if recovery_id <= 0:
-            raise ValueError(f"Invalid recovery_id: {recovery_id}")
+        if cycle_id <= 0:
+            raise ValueError(f"Invalid cycle_id: {cycle_id}")
         
         logger.info(
-            "Fetching recovery",
-            extra={"recovery_id": recovery_id}
+            "Fetching recovery for cycle",
+            extra={"cycle_id": cycle_id}
         )
         
-        endpoint = ENDPOINTS["recovery_single"].format(recovery_id=recovery_id)
+        endpoint = ENDPOINTS["recovery_for_cycle"].format(cycle_id=cycle_id)
         data = await self._request("GET", endpoint)
         return Recovery(**data)
     

@@ -44,7 +44,7 @@ from .models import (
     Sleep,
     SleepCollection,
     # Cycle
-    CycleStrain,
+    CycleScore,
     Cycle,
     CycleCollection,
     # Workout
@@ -116,7 +116,7 @@ __all__ = [
     "Sleep",
     "SleepCollection",
     # Cycle Models
-    "CycleStrain",
+    "CycleScore",
     "Cycle",
     "CycleCollection",
     # Workout Models

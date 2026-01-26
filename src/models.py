@@ -21,7 +21,7 @@ Model Hierarchy:
         - SleepCollection: Paginated sleep list
     
     Cycle (Daily Strain):
-        - CycleStrain: Daily strain metrics
+        - CycleScore: Daily strain metrics
         - Cycle: Complete cycle record
         - CycleCollection: Paginated cycle list
     
@@ -259,7 +259,7 @@ class Recovery(BaseModel):
     model_config = ConfigDict(frozen=True)
     
     cycle_id: int = Field(..., description="Associated cycle ID")
-    sleep_id: int = Field(..., description="Associated sleep ID")
+    sleep_id: str = Field(..., description="Associated sleep ID (UUID)")
     user_id: int = Field(..., description="User's unique identifier")
     created_at: datetime = Field(..., description="Record creation timestamp")
     updated_at: datetime = Field(..., description="Last update timestamp")
@@ -357,46 +357,104 @@ class SleepStage(BaseModel):
         return names.get(self.stage_id, f"Unknown ({self.stage_id})")
 
 
+class StageSummary(BaseModel):
+    """
+    Sleep stage duration breakdown from v2 API.
+    
+    All durations are in milliseconds.
+    """
+    
+    model_config = ConfigDict(frozen=True)
+    
+    total_in_bed_time_milli: int = Field(0, description="Total time in bed")
+    total_awake_time_milli: int = Field(0, description="Total time awake")
+    total_no_data_time_milli: int = Field(0, description="Time with no data")
+    total_light_sleep_time_milli: int = Field(0, description="Light sleep duration")
+    total_slow_wave_sleep_time_milli: int = Field(0, description="Deep (SWS) sleep duration")
+    total_rem_sleep_time_milli: int = Field(0, description="REM sleep duration")
+    sleep_cycle_count: int = Field(0, description="Number of sleep cycles")
+    disturbance_count: int = Field(0, description="Number of disturbances")
+    
+    @property
+    def total_sleep_time_milli(self) -> int:
+        """Total actual sleep time (light + deep + REM)."""
+        return (
+            self.total_light_sleep_time_milli +
+            self.total_slow_wave_sleep_time_milli +
+            self.total_rem_sleep_time_milli
+        )
+    
+    @property
+    def total_sleep_hours(self) -> float:
+        """Total sleep time in hours."""
+        return round(self.total_sleep_time_milli / 3600000, 2)
+    
+    @property
+    def in_bed_hours(self) -> float:
+        """Total time in bed in hours."""
+        return round(self.total_in_bed_time_milli / 3600000, 2)
+
+
+class SleepNeeded(BaseModel):
+    """
+    Sleep need breakdown from v2 API.
+    
+    All durations are in milliseconds.
+    """
+    
+    model_config = ConfigDict(frozen=True)
+    
+    baseline_milli: int = Field(0, description="Baseline sleep need")
+    need_from_sleep_debt_milli: int = Field(0, description="Additional need from sleep debt")
+    need_from_recent_strain_milli: int = Field(0, description="Additional need from recent strain")
+    need_from_recent_nap_milli: int = Field(0, description="Reduction from recent naps (can be negative)")
+    
+    @property
+    def total_needed_milli(self) -> int:
+        """Total sleep needed."""
+        return (
+            self.baseline_milli +
+            self.need_from_sleep_debt_milli +
+            self.need_from_recent_strain_milli +
+            self.need_from_recent_nap_milli
+        )
+    
+    @property
+    def total_needed_hours(self) -> float:
+        """Total sleep needed in hours."""
+        return round(self.total_needed_milli / 3600000, 2)
+
+
 class SleepScore(BaseModel):
     """
     Sleep quality score and metrics.
     
     Attributes:
-        stage_summary: Sleep stage durations in milliseconds.
-        sleep_needed: Sleep need breakdown in milliseconds.
+        stage_summary: Sleep stage durations.
+        sleep_needed: Sleep need breakdown.
         respiratory_rate: Breathing rate during sleep.
         sleep_performance_percentage: Sleep performance score (0-100).
         sleep_consistency_percentage: Sleep consistency score (0-100).
         sleep_efficiency_percentage: Sleep efficiency score (0-100).
-    
-    Example:
-        >>> score = SleepScore(
-        ...     stage_summary={"light_sleep_duration_milli": 14400000, ...},
-        ...     sleep_needed={"baseline_milli": 28800000, ...},
-        ...     respiratory_rate=14.5,
-        ...     sleep_performance_percentage=85.0,
-        ...     sleep_efficiency_percentage=92.0
-        ... )
-        >>> print(f"Total sleep: {score.total_sleep_duration_hours}h")
     """
     
     model_config = ConfigDict(frozen=True)
     
-    stage_summary: Dict[str, int] = Field(
-        ...,
-        description="Sleep stages in milliseconds"
+    stage_summary: Optional[StageSummary] = Field(
+        None,
+        description="Sleep stage breakdown"
     )
-    sleep_needed: Dict[str, int] = Field(
-        ...,
-        description="Sleep need breakdown in milliseconds"
+    sleep_needed: Optional[SleepNeeded] = Field(
+        None,
+        description="Sleep need breakdown"
     )
-    respiratory_rate: float = Field(
-        ...,
+    respiratory_rate: Optional[float] = Field(
+        None,
         gt=0,
         description="Breathing rate during sleep"
     )
-    sleep_performance_percentage: float = Field(
-        ..., 
+    sleep_performance_percentage: Optional[float] = Field(
+        None, 
         ge=0, 
         le=100,
         description="Sleep performance score 0-100"
@@ -407,8 +465,8 @@ class SleepScore(BaseModel):
         le=100,
         description="Sleep consistency score 0-100"
     )
-    sleep_efficiency_percentage: float = Field(
-        ..., 
+    sleep_efficiency_percentage: Optional[float] = Field(
+        None, 
         ge=0, 
         le=100,
         description="Sleep efficiency score 0-100"
@@ -416,41 +474,38 @@ class SleepScore(BaseModel):
     
     @property
     def total_sleep_duration_hours(self) -> float:
-        """
-        Calculate total actual sleep time in hours.
-        
-        Sum of light, deep (SWS), and REM sleep stages.
-        """
-        total_ms = (
-            self.stage_summary.get("light_sleep_duration_milli", 0) +
-            self.stage_summary.get("slow_wave_sleep_duration_milli", 0) +
-            self.stage_summary.get("rem_sleep_duration_milli", 0)
-        )
-        return round(total_ms / (1000 * 60 * 60), 2)
+        """Calculate total actual sleep time in hours."""
+        if self.stage_summary:
+            return self.stage_summary.total_sleep_hours
+        return 0.0
     
     @property
     def deep_sleep_hours(self) -> float:
         """Get deep (slow wave) sleep duration in hours."""
-        ms = self.stage_summary.get("slow_wave_sleep_duration_milli", 0)
-        return round(ms / (1000 * 60 * 60), 2)
+        if self.stage_summary:
+            return round(self.stage_summary.total_slow_wave_sleep_time_milli / 3600000, 2)
+        return 0.0
     
     @property
     def rem_sleep_hours(self) -> float:
         """Get REM sleep duration in hours."""
-        ms = self.stage_summary.get("rem_sleep_duration_milli", 0)
-        return round(ms / (1000 * 60 * 60), 2)
+        if self.stage_summary:
+            return round(self.stage_summary.total_rem_sleep_time_milli / 3600000, 2)
+        return 0.0
     
     @property
     def light_sleep_hours(self) -> float:
         """Get light sleep duration in hours."""
-        ms = self.stage_summary.get("light_sleep_duration_milli", 0)
-        return round(ms / (1000 * 60 * 60), 2)
+        if self.stage_summary:
+            return round(self.stage_summary.total_light_sleep_time_milli / 3600000, 2)
+        return 0.0
     
     @property
     def awake_hours(self) -> float:
         """Get time awake during sleep in hours."""
-        ms = self.stage_summary.get("awake_duration_milli", 0)
-        return round(ms / (1000 * 60 * 60), 2)
+        if self.stage_summary:
+            return round(self.stage_summary.total_awake_time_milli / 3600000, 2)
+        return 0.0
 
 
 class Sleep(BaseModel):
@@ -485,7 +540,8 @@ class Sleep(BaseModel):
     
     model_config = ConfigDict(frozen=True)
     
-    id: int = Field(..., description="Unique sleep record ID")
+    id: str = Field(..., description="Unique sleep record ID (UUID)")
+    cycle_id: int = Field(..., description="Associated cycle ID")
     user_id: int = Field(..., description="User's unique identifier")
     created_at: datetime = Field(..., description="Record creation timestamp")
     updated_at: datetime = Field(..., description="Last update timestamp")
@@ -550,41 +606,31 @@ class SleepCollection(BaseModel):
 # Cycle (Daily Strain) Models
 # =============================================================================
 
-class CycleStrain(BaseModel):
+class CycleScore(BaseModel):
     """
-    Cycle strain score and metrics.
+    Cycle strain score and metrics from v2 API.
     
     Represents daily strain accumulated through activities.
     
     Attributes:
-        score: Strain score (0-21 scale).
+        strain: Strain score (0-21 scale).
         average_heart_rate: Average heart rate during cycle.
         max_heart_rate: Maximum heart rate during cycle.
         kilojoule: Total energy expenditure in kilojoules.
-        distance_meter: Total distance in meters (if applicable).
-        altitude_gain_meter: Total altitude gain in meters.
-        altitude_change_meter: Net altitude change in meters.
-        zone_duration: Time in each heart rate zone in milliseconds.
-    
-    Example:
-        >>> strain = CycleStrain(
-        ...     score=14.5,
-        ...     average_heart_rate=72,
-        ...     max_heart_rate=175,
-        ...     kilojoule=2500.0,
-        ...     zone_duration={"zone_zero_milli": 3600000, ...}
-        ... )
-        >>> print(f"Daily strain: {strain.score}")
-        Daily strain: 14.5
     """
     
     model_config = ConfigDict(frozen=True)
     
-    score: float = Field(
+    strain: float = Field(
         ..., 
         ge=0, 
         le=21, 
         description="Strain score 0-21"
+    )
+    kilojoule: float = Field(
+        ..., 
+        ge=0,
+        description="Energy expenditure in kilojoules"
     )
     average_heart_rate: int = Field(
         ..., 
@@ -595,29 +641,6 @@ class CycleStrain(BaseModel):
         ..., 
         gt=0,
         description="Maximum heart rate during cycle"
-    )
-    kilojoule: float = Field(
-        ..., 
-        ge=0,
-        description="Energy expenditure in kilojoules"
-    )
-    distance_meter: Optional[float] = Field(
-        None, 
-        ge=0,
-        description="Total distance in meters"
-    )
-    altitude_gain_meter: Optional[float] = Field(
-        None, 
-        ge=0,
-        description="Total altitude gain in meters"
-    )
-    altitude_change_meter: Optional[float] = Field(
-        None, 
-        description="Net altitude change in meters"
-    )
-    zone_duration: Dict[str, int] = Field(
-        ..., 
-        description="Time in each HR zone in milliseconds"
     )
     
     @property
@@ -635,11 +658,11 @@ class CycleStrain(BaseModel):
         - Strenuous (14-17): Hard training day
         - All Out (18-21): Maximum effort
         """
-        if self.score < 10:
+        if self.strain < 10:
             return "Light"
-        elif self.score < 14:
+        elif self.strain < 14:
             return "Moderate"
-        elif self.score < 18:
+        elif self.strain < 18:
             return "Strenuous"
         else:
             return "All Out"
@@ -676,20 +699,27 @@ class Cycle(BaseModel):
     created_at: datetime = Field(..., description="Record creation timestamp")
     updated_at: datetime = Field(..., description="Last update timestamp")
     start: datetime = Field(..., description="Cycle start time")
-    end: datetime = Field(..., description="Cycle end time")
+    end: Optional[datetime] = Field(None, description="Cycle end time (None if current cycle)")
     timezone_offset: str = Field(..., description="Timezone offset")
     score_state: str = Field(
         ..., 
         description="Scoring state: SCORED, PENDING_SCORE, UNSCORABLE"
     )
-    score: Optional[CycleStrain] = Field(
+    score: Optional[CycleScore] = Field(
         None, 
         description="Cycle strain data (None if pending)"
     )
     
     @property
-    def duration_hours(self) -> float:
-        """Calculate cycle duration in hours."""
+    def is_current(self) -> bool:
+        """Check if this is the current (ongoing) cycle."""
+        return self.end is None
+    
+    @property
+    def duration_hours(self) -> Optional[float]:
+        """Calculate cycle duration in hours (None if cycle is ongoing)."""
+        if self.end is None:
+            return None
         duration = self.end - self.start
         return round(duration.total_seconds() / 3600, 2)
     
@@ -1033,14 +1063,15 @@ class Workout(BaseModel):
     
     model_config = ConfigDict(frozen=True)
     
-    id: int = Field(..., description="Unique workout ID")
+    id: str = Field(..., description="Unique workout ID (UUID)")
     user_id: int = Field(..., description="User's unique identifier")
     created_at: datetime = Field(..., description="Record creation timestamp")
     updated_at: datetime = Field(..., description="Last update timestamp")
     start: datetime = Field(..., description="Workout start time")
     end: datetime = Field(..., description="Workout end time")
     timezone_offset: str = Field(..., description="Timezone offset")
-    sport_id: int = Field(..., description="Sport type identifier")
+    sport_name: str = Field(..., description="Sport name from Whoop")
+    sport_id: Optional[int] = Field(None, description="Sport type identifier (deprecated)")
     score_state: str = Field(
         ..., 
         description="Scoring state: SCORED, PENDING_SCORE, UNSCORABLE"
@@ -1051,9 +1082,13 @@ class Workout(BaseModel):
     )
     
     @property
-    def sport_name(self) -> str:
-        """Get human-readable sport name."""
-        return SPORT_NAMES.get(self.sport_id, f"Unknown Sport ({self.sport_id})")
+    def sport_display_name(self) -> str:
+        """Get human-readable sport name (uses sport_name field or falls back to sport_id lookup)."""
+        if self.sport_name:
+            return self.sport_name.replace("_", " ").title()
+        if self.sport_id is not None:
+            return SPORT_NAMES.get(self.sport_id, f"Unknown Sport ({self.sport_id})")
+        return "Unknown Sport"
     
     @property
     def duration_hours(self) -> float:

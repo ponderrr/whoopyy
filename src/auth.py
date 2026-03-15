@@ -25,6 +25,7 @@ Example:
 import asyncio
 import secrets
 import threading
+import time
 import webbrowser
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import List, Optional
@@ -34,8 +35,10 @@ import httpx
 
 from .constants import (
     DEFAULT_TOKEN_FILE,
+    MAX_RETRIES,
     OAUTH_AUTHORIZE_URL,
     OAUTH_TOKEN_URL,
+    RETRY_BACKOFF_BASE_SECONDS,
     SCOPES,
     DEFAULT_TIMEOUT_SECONDS,
 )
@@ -576,56 +579,57 @@ class OAuthHandler:
             "scope": " ".join(self.scope),
         }
         
-        try:
+        for attempt in range(MAX_RETRIES + 1):
             response = self._http_client.post(
                 OAUTH_TOKEN_URL,
                 data=data,
             )
-            response.raise_for_status()
-            
-            token_response = response.json()
-            
-            # Build token data
-            tokens: TokenData = {
-                "access_token": token_response["access_token"],
-                "refresh_token": token_response.get(
-                    "refresh_token", refresh_token
-                ),
-                "expires_in": token_response["expires_in"],
-                "expires_at": calculate_expiry(token_response["expires_in"]),
-                "token_type": token_response.get("token_type", "Bearer"),
-                "scope": token_response.get("scope", " ".join(self.scope)),
-            }
-            
-            # Update stored tokens
-            self._tokens = tokens
-            save_tokens(tokens, self.token_file)
-            
-            logger.info(
-                "Token refresh successful",
-                extra={"expires_in": tokens["expires_in"]}
-            )
-            return tokens
-            
-        except httpx.HTTPStatusError as e:
-            error_detail = e.response.text
-            logger.error(
-                "Token refresh failed",
-                extra={
-                    "status_code": e.response.status_code,
-                    "error": error_detail,
-                }
-            )
+            if response.status_code == 200:
+                break
+            if response.status_code >= 500 and attempt < MAX_RETRIES:
+                wait = RETRY_BACKOFF_BASE_SECONDS * (2 ** attempt)
+                logger.warning(
+                    "Token refresh received %d, retrying in %.1fs (attempt %d/%d)",
+                    response.status_code, wait, attempt + 1, MAX_RETRIES
+                )
+                time.sleep(wait)
+                continue
+            # 4xx or exhausted retries: fatal
             raise WhoopTokenError(
-                f"Token refresh failed: {error_detail}",
-                status_code=e.response.status_code
+                f"Token refresh failed with status {response.status_code}: {response.text}",
+                status_code=response.status_code,
             )
-        except httpx.RequestError as e:
-            logger.error(
-                "Token refresh request error",
-                extra={"error": str(e)}
+
+        token_response = response.json()
+
+        if "refresh_token" not in token_response:
+            logger.warning(
+                "No refresh_token received from token exchange. "
+                "Long-lived sessions will not be possible. "
+                "Ensure the 'offline' scope is requested."
             )
-            raise WhoopTokenError(f"Token refresh request failed: {e}")
+
+        # Build token data
+        tokens: TokenData = {
+            "access_token": token_response["access_token"],
+            "refresh_token": token_response.get(
+                "refresh_token", refresh_token
+            ),
+            "expires_in": token_response["expires_in"],
+            "expires_at": calculate_expiry(token_response["expires_in"]),
+            "token_type": token_response.get("token_type", "Bearer"),
+            "scope": token_response.get("scope", " ".join(self.scope)),
+        }
+
+        # Update stored tokens
+        self._tokens = tokens
+        save_tokens(tokens, self.token_file)
+
+        logger.info(
+            "Token refresh successful",
+            extra={"expires_in": tokens["expires_in"]}
+        )
+        return tokens
     
     def _get_stored_refresh_token(self) -> str:
         """
@@ -759,51 +763,52 @@ class OAuthHandler:
             "scope": " ".join(self.scope),
         }
 
-        try:
+        for attempt in range(MAX_RETRIES + 1):
             async with httpx.AsyncClient() as client:
                 response = await client.post(OAUTH_TOKEN_URL, data=data)
-            response.raise_for_status()
-
-            token_response = response.json()
-
-            tokens: TokenData = {
-                "access_token": token_response["access_token"],
-                "refresh_token": token_response.get(
-                    "refresh_token", refresh_token
-                ),
-                "expires_in": token_response["expires_in"],
-                "expires_at": calculate_expiry(token_response["expires_in"]),
-                "token_type": token_response.get("token_type", "Bearer"),
-                "scope": token_response.get("scope", " ".join(self.scope)),
-            }
-
-            self._tokens = tokens
-            save_tokens(tokens, self.token_file)
-
-            logger.info(
-                "Async token refresh successful",
-                extra={"expires_in": tokens["expires_in"]},
-            )
-
-        except httpx.HTTPStatusError as e:
-            error_detail = e.response.text
-            logger.error(
-                "Async token refresh failed",
-                extra={
-                    "status_code": e.response.status_code,
-                    "error": error_detail,
-                },
-            )
+            if response.status_code == 200:
+                break
+            if response.status_code >= 500 and attempt < MAX_RETRIES:
+                wait = RETRY_BACKOFF_BASE_SECONDS * (2 ** attempt)
+                logger.warning(
+                    "Token refresh received %d, retrying in %.1fs (attempt %d/%d)",
+                    response.status_code, wait, attempt + 1, MAX_RETRIES
+                )
+                await asyncio.sleep(wait)
+                continue
+            # 4xx or exhausted retries: fatal
             raise WhoopTokenError(
-                f"Token refresh failed: {error_detail}",
-                status_code=e.response.status_code,
+                f"Token refresh failed with status {response.status_code}: {response.text}",
+                status_code=response.status_code,
             )
-        except httpx.RequestError as e:
-            logger.error(
-                "Async token refresh request error",
-                extra={"error": str(e)},
+
+        token_response = response.json()
+
+        if "refresh_token" not in token_response:
+            logger.warning(
+                "No refresh_token received from token exchange. "
+                "Long-lived sessions will not be possible. "
+                "Ensure the 'offline' scope is requested."
             )
-            raise WhoopTokenError(f"Token refresh request failed: {e}")
+
+        tokens: TokenData = {
+            "access_token": token_response["access_token"],
+            "refresh_token": token_response.get(
+                "refresh_token", refresh_token
+            ),
+            "expires_in": token_response["expires_in"],
+            "expires_at": calculate_expiry(token_response["expires_in"]),
+            "token_type": token_response.get("token_type", "Bearer"),
+            "scope": token_response.get("scope", " ".join(self.scope)),
+        }
+
+        self._tokens = tokens
+        save_tokens(tokens, self.token_file)
+
+        logger.info(
+            "Async token refresh successful",
+            extra={"expires_in": tokens["expires_in"]},
+        )
 
     def has_valid_tokens(self) -> bool:
         """

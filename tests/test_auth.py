@@ -268,9 +268,10 @@ class TestTokenRefresh:
         oauth_handler._tokens = mock_tokens
         
         mock_response = Mock()
+        mock_response.status_code = 200
         mock_response.json.return_value = mock_token_response
         mock_response.raise_for_status = Mock()
-        
+
         with patch.object(
             oauth_handler._http_client,
             "post",
@@ -278,7 +279,7 @@ class TestTokenRefresh:
         ):
             with patch("whoopyy.auth.save_tokens"):
                 new_tokens = oauth_handler.refresh_access_token()
-        
+
         assert new_tokens["access_token"] == "test_access_token"
         assert "expires_at" in new_tokens
     
@@ -395,9 +396,10 @@ class TestTokenManagement:
         oauth_handler._tokens = expired_tokens
         
         mock_response = Mock()
+        mock_response.status_code = 200
         mock_response.json.return_value = mock_token_response
         mock_response.raise_for_status = Mock()
-        
+
         with patch.object(
             oauth_handler._http_client,
             "post",
@@ -405,7 +407,7 @@ class TestTokenManagement:
         ):
             with patch("whoopyy.auth.save_tokens"):
                 token = oauth_handler.get_valid_token()
-        
+
         assert token == "test_access_token"
     
     def test_get_valid_token_no_tokens(
@@ -748,3 +750,193 @@ def test_token_file_path_is_absolute():
     """TOKEN_FILE_PATH should be an absolute path."""
     from whoopyy import constants
     assert constants.TOKEN_FILE_PATH.startswith("/")
+
+
+# =============================================================================
+# Retry and Warning Tests
+# =============================================================================
+
+class TestTokenRefreshRetry:
+    """Tests for 5xx retry logic and missing-refresh-token warning."""
+
+    def _make_handler_with_tokens(self):
+        handler = OAuthHandler(
+            client_id="test_client_id",
+            client_secret="test_client_secret",
+        )
+        handler._tokens = {
+            "access_token": "old_token",
+            "refresh_token": "test_refresh_token",
+            "expires_in": 3600,
+            "expires_at": time.time() + 3600,
+            "token_type": "Bearer",
+            "scope": "offline",
+        }
+        return handler
+
+    def _make_mock_response(self, status_code, json_data=None, text="error"):
+        mock_resp = Mock()
+        mock_resp.status_code = status_code
+        mock_resp.text = text
+        if json_data is not None:
+            mock_resp.json.return_value = json_data
+        return mock_resp
+
+    def test_refresh_retries_on_503(self):
+        """Token refresh should retry on 503, succeed on third attempt."""
+        from whoopyy.constants import MAX_RETRIES
+
+        handler = self._make_handler_with_tokens()
+
+        good_response_data = {
+            "access_token": "new_access_token",
+            "refresh_token": "new_refresh_token",
+            "expires_in": 3600,
+            "token_type": "Bearer",
+            "scope": "offline",
+        }
+
+        responses = [
+            self._make_mock_response(503),
+            self._make_mock_response(503),
+            self._make_mock_response(200, json_data=good_response_data),
+        ]
+
+        with patch.object(handler._http_client, "post", side_effect=responses) as mock_post:
+            with patch("whoopyy.auth.save_tokens"):
+                with patch("whoopyy.auth.time") as mock_time:
+                    mock_time.sleep = Mock()
+                    tokens = handler.refresh_access_token()
+
+        assert tokens["access_token"] == "new_access_token"
+        assert mock_post.call_count == 3
+
+    def test_refresh_raises_after_max_retries(self):
+        """Token refresh should raise WhoopTokenError after MAX_RETRIES+1 503 responses."""
+        from whoopyy.constants import MAX_RETRIES
+
+        handler = self._make_handler_with_tokens()
+
+        responses = [self._make_mock_response(503) for _ in range(MAX_RETRIES + 1)]
+
+        with patch.object(handler._http_client, "post", side_effect=responses) as mock_post:
+            with patch("whoopyy.auth.time") as mock_time:
+                mock_time.sleep = Mock()
+                with pytest.raises(WhoopTokenError):
+                    handler.refresh_access_token()
+
+        assert mock_post.call_count == MAX_RETRIES + 1
+
+    def test_refresh_fatal_on_4xx(self):
+        """Token refresh should raise WhoopTokenError immediately on 4xx (no retry)."""
+        handler = self._make_handler_with_tokens()
+
+        responses = [self._make_mock_response(401, text="unauthorized")]
+
+        with patch.object(handler._http_client, "post", side_effect=responses) as mock_post:
+            with pytest.raises(WhoopTokenError) as exc_info:
+                handler.refresh_access_token()
+
+        assert mock_post.call_count == 1
+        assert exc_info.value.status_code == 401
+
+    def test_missing_refresh_token_logs_warning(self):
+        """Missing refresh_token in exchange response should log a warning."""
+        handler = self._make_handler_with_tokens()
+
+        response_without_refresh = {
+            "access_token": "new_access_token",
+            # no refresh_token key
+            "expires_in": 3600,
+            "token_type": "Bearer",
+            "scope": "read:recovery",
+        }
+
+        mock_resp = self._make_mock_response(200, json_data=response_without_refresh)
+
+        with patch.object(handler._http_client, "post", return_value=mock_resp):
+            with patch("whoopyy.auth.save_tokens"):
+                with patch("whoopyy.auth.logger") as mock_logger:
+                    handler.refresh_access_token()
+
+        warning_calls = mock_logger.warning.call_args_list
+        assert any(
+            "refresh_token" in str(call)
+            for call in warning_calls
+        ), f"Expected warning about missing refresh_token, got calls: {warning_calls}"
+
+    def test_token_refresh_buffer_triggers(self):
+        """Token expiring in 30s (< buffer of 60s) should trigger proactive refresh."""
+        from whoopyy.constants import TOKEN_REFRESH_BUFFER_SECONDS
+
+        handler = OAuthHandler(
+            client_id="test_client_id",
+            client_secret="test_client_secret",
+        )
+        # Token expires in 30s, which is within the 60s buffer
+        handler._tokens = {
+            "access_token": "current_token",
+            "refresh_token": "test_refresh_token",
+            "expires_in": 3600,
+            "expires_at": time.time() + 30,
+            "token_type": "Bearer",
+            "scope": "offline",
+        }
+
+        refresh_called = {"called": False}
+
+        def mock_refresh(*args, **kwargs):
+            refresh_called["called"] = True
+            handler._tokens = {
+                "access_token": "refreshed_token",
+                "refresh_token": "test_refresh_token",
+                "expires_in": 3600,
+                "expires_at": time.time() + 3600,
+                "token_type": "Bearer",
+                "scope": "offline",
+            }
+            return handler._tokens
+
+        handler.refresh_access_token = mock_refresh
+
+        handler.get_valid_token()
+
+        assert refresh_called["called"], (
+            "Expected refresh_access_token to be called when token expires in 30s "
+            f"(buffer is {TOKEN_REFRESH_BUFFER_SECONDS}s)"
+        )
+        handler.close()
+
+    def test_token_refresh_buffer_not_triggered(self):
+        """Token expiring in 300s (> buffer of 60s) should not trigger proactive refresh."""
+        from whoopyy.constants import TOKEN_REFRESH_BUFFER_SECONDS
+
+        handler = OAuthHandler(
+            client_id="test_client_id",
+            client_secret="test_client_secret",
+        )
+        # Token expires in 300s, well outside the 60s buffer
+        handler._tokens = {
+            "access_token": "current_token",
+            "refresh_token": "test_refresh_token",
+            "expires_in": 3600,
+            "expires_at": time.time() + 300,
+            "token_type": "Bearer",
+            "scope": "offline",
+        }
+
+        refresh_called = {"called": False}
+
+        def mock_refresh(*args, **kwargs):
+            refresh_called["called"] = True
+
+        handler.refresh_access_token = mock_refresh
+
+        token = handler.get_valid_token()
+
+        assert not refresh_called["called"], (
+            "Expected refresh_access_token NOT to be called when token expires in 300s "
+            f"(buffer is {TOKEN_REFRESH_BUFFER_SECONDS}s)"
+        )
+        assert token == "current_token"
+        handler.close()

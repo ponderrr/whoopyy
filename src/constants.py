@@ -33,26 +33,24 @@ OAUTH_TOKEN_URL: Final[str] = f"{AUTH_BASE_URL}/oauth2/token"
 
 ENDPOINTS: Final[dict[str, str]] = {
     # User Profile
-    "user_profile_basic": "/developer/v2/user/profile/basic",
-    "user_body_measurement": "/developer/v2/user/measurement/body",
-    "user_access_revoke": "/developer/v2/user/access",
-    
+    "user_profile_basic": "/developer/v1/user/profile/basic",
+    "user_body_measurement": "/developer/v1/user/measurement/body",
+
     # Recovery
-    "recovery_collection": "/developer/v2/recovery",
-    "recovery_for_cycle": "/developer/v2/cycle/{cycle_id}/recovery",
-    
+    "recovery_collection": "/developer/v1/recovery",
+    "recovery_for_cycle": "/developer/v1/cycle/{cycle_id}/recovery",
+
     # Sleep
-    "sleep_single": "/developer/v2/activity/sleep/{sleep_id}",
-    "sleep_collection": "/developer/v2/activity/sleep",
-    "sleep_for_cycle": "/developer/v2/cycle/{cycle_id}/sleep",
-    
+    "sleep_single": "/developer/v1/activity/sleep/{sleep_id}",
+    "sleep_collection": "/developer/v1/activity/sleep",
+
     # Cycle (Daily Strain)
-    "cycle_single": "/developer/v2/cycle/{cycle_id}",
-    "cycle_collection": "/developer/v2/cycle",
-    
+    "cycle_single": "/developer/v1/cycle/{cycle_id}",
+    "cycle_collection": "/developer/v1/cycle",
+
     # Workout
-    "workout_single": "/developer/v2/activity/workout/{workout_id}",
-    "workout_collection": "/developer/v2/activity/workout",
+    "workout_single": "/developer/v1/activity/workout/{workout_id}",
+    "workout_collection": "/developer/v1/activity/workout",
 }
 """
 API endpoint paths mapped by resource type.
@@ -133,7 +131,7 @@ RETRY_BACKOFF_BASE_SECONDS: Final[float] = 1.0
 DEFAULT_PAGE_LIMIT: Final[int] = 25
 """Default number of records per page for collection requests."""
 
-MAX_PAGE_LIMIT: Final[int] = 50
+MAX_PAGE_LIMIT: Final[int] = 25
 """Maximum allowed records per page (API constraint)."""
 
 # =============================================================================

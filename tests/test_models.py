@@ -695,6 +695,104 @@ class TestSportNamesConstant:
     def test_common_sports_present(self) -> None:
         """Test that common sports are present."""
         common_sports = [0, 1, 44, 45, 52, 96]  # Running, Cycling, Yoga, etc.
-        
+
         for sport_id in common_sports:
             assert sport_id in SPORT_NAMES
+
+
+# =============================================================================
+# New Workout / WorkoutZoneDuration Model Tests
+# =============================================================================
+
+class TestWorkoutDeserializesWithSportId:
+    """Tests for Workout model using sport_id (v2 API behavior)."""
+
+    def test_workout_deserializes_with_sport_id(self) -> None:
+        """Test that a workout with sport_id (and no sport_name) parses correctly."""
+        workout = Workout(
+            id="abc-123",
+            user_id=1,
+            created_at=datetime(2024, 1, 15, 10, 0, 0, tzinfo=timezone.utc),
+            updated_at=datetime(2024, 1, 15, 11, 0, 0, tzinfo=timezone.utc),
+            start=datetime(2024, 1, 15, 10, 0, 0, tzinfo=timezone.utc),
+            end=datetime(2024, 1, 15, 11, 0, 0, tzinfo=timezone.utc),
+            timezone_offset="-05:00",
+            sport_id=0,
+            score_state="SCORED",
+        )
+        assert workout.sport_id == 0
+
+    def test_workout_sport_name_is_optional(self) -> None:
+        """Test that sport_name defaults to None when not provided."""
+        workout = Workout(
+            id="abc-456",
+            user_id=1,
+            created_at=datetime(2024, 1, 15, 10, 0, 0, tzinfo=timezone.utc),
+            updated_at=datetime(2024, 1, 15, 11, 0, 0, tzinfo=timezone.utc),
+            start=datetime(2024, 1, 15, 10, 0, 0, tzinfo=timezone.utc),
+            end=datetime(2024, 1, 15, 11, 0, 0, tzinfo=timezone.utc),
+            timezone_offset="-05:00",
+            sport_id=1,
+            score_state="SCORED",
+        )
+        assert workout.sport_name is None
+
+    def test_workout_sport_name_explicit_value(self) -> None:
+        """Test that sport_name is stored when explicitly provided."""
+        workout = Workout(
+            id="abc-789",
+            user_id=1,
+            created_at=datetime(2024, 1, 15, 10, 0, 0, tzinfo=timezone.utc),
+            updated_at=datetime(2024, 1, 15, 11, 0, 0, tzinfo=timezone.utc),
+            start=datetime(2024, 1, 15, 10, 0, 0, tzinfo=timezone.utc),
+            end=datetime(2024, 1, 15, 11, 0, 0, tzinfo=timezone.utc),
+            timezone_offset="-05:00",
+            sport_id=0,
+            sport_name="Running",
+            score_state="SCORED",
+        )
+        assert workout.sport_name == "Running"
+
+
+class TestWorkoutZoneDurationNullable:
+    """Tests for WorkoutZoneDuration with nullable zone fields."""
+
+    def test_workout_zone_durations_nullable(self) -> None:
+        """Test that all zone fields accept None."""
+        zones = WorkoutZoneDuration(
+            zone_zero_milli=None,
+            zone_one_milli=None,
+            zone_two_milli=None,
+            zone_three_milli=None,
+            zone_four_milli=None,
+            zone_five_milli=None,
+        )
+        assert zones.zone_zero_milli is None
+        assert zones.zone_five_milli is None
+
+    def test_workout_zone_durations_defaults_to_none(self) -> None:
+        """Test that zone fields default to None when not specified."""
+        zones = WorkoutZoneDuration()
+        assert zones.zone_zero_milli is None
+        assert zones.zone_one_milli is None
+        assert zones.zone_two_milli is None
+        assert zones.zone_three_milli is None
+        assert zones.zone_four_milli is None
+        assert zones.zone_five_milli is None
+
+    def test_workout_zone_durations_with_values(self) -> None:
+        """Test that all zone fields accept integer values."""
+        zones = WorkoutZoneDuration(
+            zone_zero_milli=60000,
+            zone_one_milli=300000,
+            zone_two_milli=600000,
+            zone_three_milli=900000,
+            zone_four_milli=300000,
+            zone_five_milli=60000,
+        )
+        assert zones.zone_zero_milli == 60000
+        assert zones.zone_one_milli == 300000
+        assert zones.zone_two_milli == 600000
+        assert zones.zone_three_milli == 900000
+        assert zones.zone_four_milli == 300000
+        assert zones.zone_five_milli == 60000

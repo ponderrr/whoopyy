@@ -306,23 +306,23 @@ def export_sleep_csv(
         # Data rows
         for sleep in records:
             if sleep.score:
-                stages = sleep.score.stage_summary or {}
+                stages = sleep.score.stage_summary
                 ms_to_hours = 1 / (1000 * 60 * 60)
-                
-                light = stages.get("total_light_sleep_time_milli", 0) * ms_to_hours
-                deep = stages.get("total_slow_wave_sleep_time_milli", 0) * ms_to_hours
-                rem = stages.get("total_rem_sleep_time_milli", 0) * ms_to_hours
-                awake = stages.get("total_awake_time_milli", 0) * ms_to_hours
-                
+
+                light = (stages.total_light_sleep_time_milli or 0) * ms_to_hours if stages else 0
+                deep = (stages.total_slow_wave_sleep_time_milli or 0) * ms_to_hours if stages else 0
+                rem = (stages.total_rem_sleep_time_milli or 0) * ms_to_hours if stages else 0
+                awake = (stages.total_awake_time_milli or 0) * ms_to_hours if stages else 0
+
                 writer.writerow([
                     sleep.start.date().isoformat(),
                     sleep.start.time().isoformat(),
                     sleep.end.time().isoformat() if sleep.end else "",
                     f"{sleep.duration_hours:.2f}" if sleep.duration_hours else "",
                     f"{sleep.score.total_sleep_duration_hours:.2f}",
-                    f"{sleep.score.sleep_performance_percentage:.1f}",
-                    f"{sleep.score.sleep_efficiency_percentage:.1f}",
-                    f"{sleep.score.respiratory_rate:.1f}",
+                    f"{sleep.score.sleep_performance_percentage:.1f}" if sleep.score.sleep_performance_percentage is not None else "",
+                    f"{sleep.score.sleep_efficiency_percentage:.1f}" if sleep.score.sleep_efficiency_percentage is not None else "",
+                    f"{sleep.score.respiratory_rate:.1f}" if sleep.score.respiratory_rate is not None else "",
                     f"{light:.2f}",
                     f"{deep:.2f}",
                     f"{rem:.2f}",
@@ -407,7 +407,7 @@ def export_cycle_csv(
                     cycle.start.date().isoformat(),
                     cycle.start.isoformat(),
                     cycle.end.isoformat() if cycle.end else "",
-                    f"{cycle.score.score:.1f}",
+                    f"{cycle.score.strain:.1f}",
                     cycle.score.average_heart_rate,
                     cycle.score.max_heart_rate,
                     f"{cycle.score.kilojoule:.1f}",
@@ -653,15 +653,18 @@ def analyze_sleep_trends(
     
     # Extract metrics (score is guaranteed non-None after filter)
     durations = [s.score.total_sleep_duration_hours for s in scored if s.score is not None]
-    performances = [s.score.sleep_performance_percentage for s in scored if s.score is not None]
-    efficiencies = [s.score.sleep_efficiency_percentage for s in scored if s.score is not None]
-    respiratory_rates = [s.score.respiratory_rate for s in scored if s.score is not None]
-    
+    perf_values = [s.score.sleep_performance_percentage for s in scored
+                   if s.score and s.score.sleep_performance_percentage is not None]
+    eff_values = [s.score.sleep_efficiency_percentage for s in scored
+                  if s.score and s.score.sleep_efficiency_percentage is not None]
+    resp_values = [s.score.respiratory_rate for s in scored
+                   if s.score and s.score.respiratory_rate is not None]
+
     # Basic statistics
     average_duration = sum(durations) / len(durations)
-    average_performance = sum(performances) / len(performances)
-    average_efficiency = sum(efficiencies) / len(efficiencies)
-    average_respiratory = sum(respiratory_rates) / len(respiratory_rates)
+    average_performance = sum(perf_values) / len(perf_values) if perf_values else 0.0
+    average_efficiency = sum(eff_values) / len(eff_values) if eff_values else 0.0
+    average_respiratory = sum(resp_values) / len(resp_values) if resp_values else 0.0
     
     # Sleep below 7 hours
     nights_below_7h = sum(1 for d in durations if d < 7)
@@ -712,7 +715,7 @@ def analyze_training_load(
         raise ValueError("No scored cycle records to analyze")
     
     # Extract strain scores (score is guaranteed non-None after filter)
-    strains = [c.score.score for c in scored_cycles if c.score is not None]
+    strains = [c.score.strain for c in scored_cycles if c.score is not None]
     
     # Basic statistics
     total_strain = sum(strains)

@@ -505,3 +505,158 @@ class TestCalculateMovingAverage:
         """Test that invalid window raises ValueError."""
         with pytest.raises(ValueError, match="Window must be at least 1"):
             calculate_moving_average([1.0, 2.0, 3.0], window=0)
+
+
+# =============================================================================
+# Bug-fix Regression Tests
+# =============================================================================
+
+class TestExportCycleCsvNoAttributeError:
+    """Regression tests for cycle.score.strain (was .score) bug."""
+
+    def test_export_cycle_csv_no_attribute_error(self) -> None:
+        """Calling export_cycle_csv on a scored Cycle should not raise AttributeError."""
+        from whoopyy.models import CycleScore
+
+        score = CycleScore(
+            strain=12.5,
+            kilojoule=2000.0,
+            average_heart_rate=75,
+            max_heart_rate=160,
+        )
+        cycle = Cycle(
+            id=1,
+            user_id=12345,
+            created_at=datetime(2024, 1, 15, 8, 0, 0, tzinfo=timezone.utc),
+            updated_at=datetime(2024, 1, 15, 20, 0, 0, tzinfo=timezone.utc),
+            start=datetime(2024, 1, 15, 8, 0, 0, tzinfo=timezone.utc),
+            end=datetime(2024, 1, 16, 8, 0, 0, tzinfo=timezone.utc),
+            timezone_offset="-05:00",
+            score_state="SCORED",
+            score=score,
+        )
+
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as f:
+            filepath = Path(f.name)
+
+        try:
+            count = export_cycle_csv([cycle], filepath)
+            assert count == 1
+        finally:
+            filepath.unlink(missing_ok=True)
+
+    def test_analyze_training_load_no_attribute_error(self) -> None:
+        """analyze_training_load with a scored Cycle should not raise AttributeError."""
+        from whoopyy.models import CycleScore
+
+        score = CycleScore(
+            strain=10.0,
+            kilojoule=1800.0,
+            average_heart_rate=70,
+            max_heart_rate=155,
+        )
+        cycle = Cycle(
+            id=2,
+            user_id=12345,
+            created_at=datetime(2024, 1, 15, 8, 0, 0, tzinfo=timezone.utc),
+            updated_at=datetime(2024, 1, 15, 20, 0, 0, tzinfo=timezone.utc),
+            start=datetime(2024, 1, 15, 8, 0, 0, tzinfo=timezone.utc),
+            end=datetime(2024, 1, 16, 8, 0, 0, tzinfo=timezone.utc),
+            timezone_offset="-05:00",
+            score_state="SCORED",
+            score=score,
+        )
+
+        trends = analyze_training_load([cycle])
+        assert trends.total_strain == pytest.approx(10.0)
+
+
+class TestExportSleepCsvAttributeAccess:
+    """Regression tests for StageSummary dict vs. attribute access bug."""
+
+    def test_export_sleep_csv_stage_summary_access(self) -> None:
+        """export_sleep_csv with a non-None StageSummary should not raise AttributeError."""
+        from whoopyy.models import StageSummary, SleepNeeded
+
+        stage_summary = StageSummary(
+            total_in_bed_time_milli=28800000,
+            total_awake_time_milli=1800000,
+            total_no_data_time_milli=0,
+            total_light_sleep_time_milli=14400000,
+            total_slow_wave_sleep_time_milli=5400000,
+            total_rem_sleep_time_milli=7200000,
+            sleep_cycle_count=4,
+            disturbance_count=2,
+        )
+        score = SleepScore(
+            stage_summary=stage_summary,
+            sleep_needed=SleepNeeded(),
+            respiratory_rate=14.5,
+            sleep_performance_percentage=85.0,
+            sleep_consistency_percentage=90.0,
+            sleep_efficiency_percentage=92.0,
+        )
+        sleep = Sleep(
+            id="sleep-uuid-001",
+            cycle_id=1,
+            user_id=12345,
+            created_at=datetime(2024, 1, 15, 8, 0, 0, tzinfo=timezone.utc),
+            updated_at=datetime(2024, 1, 15, 8, 0, 0, tzinfo=timezone.utc),
+            start=datetime(2024, 1, 14, 22, 30, 0, tzinfo=timezone.utc),
+            end=datetime(2024, 1, 15, 6, 30, 0, tzinfo=timezone.utc),
+            timezone_offset="-05:00",
+            nap=False,
+            score_state="SCORED",
+            score=score,
+        )
+
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as f:
+            filepath = Path(f.name)
+
+        try:
+            count = export_sleep_csv([sleep], filepath)
+            assert count == 1
+        finally:
+            filepath.unlink(missing_ok=True)
+
+    def test_export_sleep_csv_none_score_fields(self) -> None:
+        """export_sleep_csv with None optional score fields should not raise TypeError."""
+        score = SleepScore(
+            stage_summary=None,
+            sleep_needed=None,
+            respiratory_rate=None,
+            sleep_performance_percentage=None,
+            sleep_consistency_percentage=None,
+            sleep_efficiency_percentage=None,
+        )
+        sleep = Sleep(
+            id="sleep-uuid-002",
+            cycle_id=2,
+            user_id=12345,
+            created_at=datetime(2024, 1, 15, 8, 0, 0, tzinfo=timezone.utc),
+            updated_at=datetime(2024, 1, 15, 8, 0, 0, tzinfo=timezone.utc),
+            start=datetime(2024, 1, 14, 22, 30, 0, tzinfo=timezone.utc),
+            end=datetime(2024, 1, 15, 6, 30, 0, tzinfo=timezone.utc),
+            timezone_offset="-05:00",
+            nap=False,
+            score_state="SCORED",
+            score=score,
+        )
+
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as f:
+            filepath = Path(f.name)
+
+        try:
+            count = export_sleep_csv([sleep], filepath)
+            assert count == 1
+        finally:
+            filepath.unlink(missing_ok=True)

@@ -790,12 +790,12 @@ class WorkoutZoneDuration(BaseModel):
     
     model_config = ConfigDict(frozen=True)
     
-    zone_zero_milli: int = Field(..., ge=0, description="Time below zone 1")
-    zone_one_milli: int = Field(..., ge=0, description="Zone 1 (light)")
-    zone_two_milli: int = Field(..., ge=0, description="Zone 2 (moderate)")
-    zone_three_milli: int = Field(..., ge=0, description="Zone 3 (hard)")
-    zone_four_milli: int = Field(..., ge=0, description="Zone 4 (very hard)")
-    zone_five_milli: int = Field(..., ge=0, description="Zone 5 (max)")
+    zone_zero_milli: Optional[int] = None
+    zone_one_milli: Optional[int] = None
+    zone_two_milli: Optional[int] = None
+    zone_three_milli: Optional[int] = None
+    zone_four_milli: Optional[int] = None
+    zone_five_milli: Optional[int] = None
     
     @property
     def zone_zero_minutes(self) -> float:
@@ -1070,8 +1070,8 @@ class Workout(BaseModel):
     start: datetime = Field(..., description="Workout start time")
     end: datetime = Field(..., description="Workout end time")
     timezone_offset: str = Field(..., description="Timezone offset")
-    sport_name: str = Field(..., description="Sport name from Whoop")
-    sport_id: Optional[int] = Field(None, description="Sport type identifier (deprecated)")
+    sport_id: int = Field(..., description="Sport identifier returned by the WHOOP API.")
+    sport_name: Optional[str] = Field(None, description="Not returned by WHOOP API. Use sport_id with constants.SPORT_NAMES for lookup.")
     score_state: str = Field(
         ..., 
         description="Scoring state: SCORED, PENDING_SCORE, UNSCORABLE"

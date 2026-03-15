@@ -643,28 +643,28 @@ class WhoopClient:
     # Sleep Methods
     # =========================================================================
     
-    def get_sleep(self, sleep_id: int) -> Sleep:
+    def get_sleep(self, sleep_id: str) -> Sleep:
         """
         Get specific sleep record by ID.
-        
+
         Args:
-            sleep_id: Sleep record ID.
-        
+            sleep_id: Sleep record UUID string.
+
         Returns:
             Sleep record with score and metadata.
-        
+
         Raises:
             WhoopAPIError: If request fails or sleep not found.
             ValueError: If sleep_id is invalid.
-        
+
         Example:
-            >>> sleep = client.get_sleep(123456)
+            >>> sleep = client.get_sleep("abc-123")
             >>> print(f"Duration: {sleep.duration_hours}h")
             >>> if sleep.score:
             ...     print(f"Performance: {sleep.score.sleep_performance_percentage}%")
         """
-        if sleep_id <= 0:
-            raise ValueError(f"Invalid sleep_id: {sleep_id}")
+        if not sleep_id or not sleep_id.strip():
+            raise ValueError(f"Invalid sleep_id: {sleep_id!r}")
         
         logger.info(
             "Fetching sleep",
@@ -974,25 +974,25 @@ class WhoopClient:
     # Workout Methods
     # =========================================================================
     
-    def get_workout(self, workout_id: int) -> Workout:
+    def get_workout(self, workout_id: str) -> Workout:
         """
         Get specific workout by ID.
-        
+
         Args:
-            workout_id: Workout ID.
-        
+            workout_id: Workout UUID string.
+
         Returns:
             Workout record with score and metadata.
-        
+
         Example:
-            >>> workout = client.get_workout(123456)
+            >>> workout = client.get_workout("abc-123")
             >>> print(f"{workout.sport_name}: {workout.duration_minutes:.0f}min")
             >>> if workout.score:
             ...     print(f"Strain: {workout.score.strain}")
             ...     print(f"Calories: {workout.score.calories}")
         """
-        if workout_id <= 0:
-            raise ValueError(f"Invalid workout_id: {workout_id}")
+        if not workout_id or not workout_id.strip():
+            raise ValueError(f"Invalid workout_id: {workout_id!r}")
         
         logger.info(
             "Fetching workout",

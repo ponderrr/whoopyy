@@ -353,10 +353,46 @@ class TestAsyncSleepMethods:
 
         async_client._http_client.request = AsyncMock(return_value=mock_response)
 
-        sleep = await async_client.get_sleep(123)
+        sleep = await async_client.get_sleep("a1b2c3d4-e5f6-7890-abcd-ef1234567890")
 
         assert isinstance(sleep, Sleep)
         assert sleep.id == "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+
+    @pytest.mark.asyncio
+    async def test_get_sleep_accepts_uuid_string(self, async_client) -> None:
+        """Test async get_sleep accepts a UUID string and makes HTTP call."""
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "id": "abc-123",
+            "cycle_id": 100,
+            "user_id": 456,
+            "created_at": "2024-01-15T08:00:00.000Z",
+            "updated_at": "2024-01-15T08:00:00.000Z",
+            "start": "2024-01-14T22:30:00.000Z",
+            "end": "2024-01-15T06:30:00.000Z",
+            "timezone_offset": "-05:00",
+            "nap": False,
+            "score_state": "SCORED",
+            "score": None,
+        }
+        mock_response.raise_for_status = Mock()
+
+        mock_request = AsyncMock(return_value=mock_response)
+        async_client._http_client.request = mock_request
+
+        sleep = await async_client.get_sleep("abc-123")
+
+        assert isinstance(sleep, Sleep)
+        mock_request.assert_called_once()
+        call_kwargs = mock_request.call_args.kwargs
+        assert "abc-123" in call_kwargs["url"]
+
+    @pytest.mark.asyncio
+    async def test_get_sleep_rejects_empty_string(self, async_client) -> None:
+        """Test async get_sleep raises ValueError for empty string."""
+        with pytest.raises(ValueError, match="Invalid sleep_id"):
+            await async_client.get_sleep("")
 
 
 # =============================================================================
@@ -420,11 +456,46 @@ class TestAsyncWorkoutMethods:
 
         async_client._http_client.request = AsyncMock(return_value=mock_response)
 
-        workout = await async_client.get_workout(123)
+        workout = await async_client.get_workout("abc-workout-uuid")
 
         assert isinstance(workout, Workout)
         assert workout.id == "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
         assert workout.sport_display_name == "Running"
+
+    @pytest.mark.asyncio
+    async def test_get_workout_accepts_uuid_string(self, async_client) -> None:
+        """Test async get_workout accepts a UUID string and makes HTTP call."""
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "id": "abc-123",
+            "user_id": 456,
+            "created_at": "2024-01-15T10:00:00.000Z",
+            "updated_at": "2024-01-15T11:00:00.000Z",
+            "start": "2024-01-15T10:00:00.000Z",
+            "end": "2024-01-15T11:00:00.000Z",
+            "timezone_offset": "-05:00",
+            "sport_id": 0,
+            "score_state": "SCORED",
+            "score": None,
+        }
+        mock_response.raise_for_status = Mock()
+
+        mock_request = AsyncMock(return_value=mock_response)
+        async_client._http_client.request = mock_request
+
+        workout = await async_client.get_workout("abc-123")
+
+        assert isinstance(workout, Workout)
+        mock_request.assert_called_once()
+        call_kwargs = mock_request.call_args.kwargs
+        assert "abc-123" in call_kwargs["url"]
+
+    @pytest.mark.asyncio
+    async def test_get_workout_rejects_empty_string(self, async_client) -> None:
+        """Test async get_workout raises ValueError for empty string."""
+        with pytest.raises(ValueError, match="Invalid workout_id"):
+            await async_client.get_workout("")
 
 
 # =============================================================================

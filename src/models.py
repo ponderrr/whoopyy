@@ -44,7 +44,7 @@ Example:
 """
 
 from datetime import datetime
-from typing import Optional, Dict, List, ClassVar
+from typing import Optional, Dict, List, ClassVar, Literal
 
 from pydantic import BaseModel, Field, ConfigDict
 
@@ -186,14 +186,14 @@ class RecoveryScore(BaseModel):
         le=100, 
         description="Recovery score 0-100"
     )
-    resting_heart_rate: int = Field(
-        ..., 
+    resting_heart_rate: float = Field(
+        ...,
         gt=0,
         description="Resting heart rate in bpm"
     )
     hrv_rmssd_milli: float = Field(
-        ..., 
-        gt=0,
+        ...,
+        ge=0,
         description="HRV RMSSD in milliseconds"
     )
     spo2_percentage: Optional[float] = Field(
@@ -263,8 +263,8 @@ class Recovery(BaseModel):
     user_id: int = Field(..., description="User's unique identifier")
     created_at: datetime = Field(..., description="Record creation timestamp")
     updated_at: datetime = Field(..., description="Last update timestamp")
-    score_state: str = Field(
-        ..., 
+    score_state: Literal["SCORED", "PENDING_SCORE", "UNSCORABLE"] = Field(
+        ...,
         description="Scoring state: SCORED, PENDING_SCORE, UNSCORABLE"
     )
     score: Optional[RecoveryScore] = Field(
@@ -450,7 +450,7 @@ class SleepScore(BaseModel):
     )
     respiratory_rate: Optional[float] = Field(
         None,
-        gt=0,
+        ge=0,
         description="Breathing rate during sleep"
     )
     sleep_performance_percentage: Optional[float] = Field(
@@ -549,8 +549,8 @@ class Sleep(BaseModel):
     end: datetime = Field(..., description="Sleep end time")
     timezone_offset: str = Field(..., description="Timezone offset")
     nap: bool = Field(..., description="True if nap, False if main sleep")
-    score_state: str = Field(
-        ..., 
+    score_state: Literal["SCORED", "PENDING_SCORE", "UNSCORABLE"] = Field(
+        ...,
         description="Scoring state: SCORED, PENDING_SCORE, UNSCORABLE"
     )
     score: Optional[SleepScore] = Field(
@@ -701,8 +701,8 @@ class Cycle(BaseModel):
     start: datetime = Field(..., description="Cycle start time")
     end: Optional[datetime] = Field(None, description="Cycle end time (None if current cycle)")
     timezone_offset: str = Field(..., description="Timezone offset")
-    score_state: str = Field(
-        ..., 
+    score_state: Literal["SCORED", "PENDING_SCORE", "UNSCORABLE"] = Field(
+        ...,
         description="Scoring state: SCORED, PENDING_SCORE, UNSCORABLE"
     )
     score: Optional[CycleScore] = Field(
@@ -1072,8 +1072,8 @@ class Workout(BaseModel):
     timezone_offset: str = Field(..., description="Timezone offset")
     sport_id: int = Field(..., description="Sport identifier returned by the WHOOP API.")
     sport_name: Optional[str] = Field(None, description="Not returned by WHOOP API. Use sport_id with constants.SPORT_NAMES for lookup.")
-    score_state: str = Field(
-        ..., 
+    score_state: Literal["SCORED", "PENDING_SCORE", "UNSCORABLE"] = Field(
+        ...,
         description="Scoring state: SCORED, PENDING_SCORE, UNSCORABLE"
     )
     score: Optional[WorkoutScore] = Field(

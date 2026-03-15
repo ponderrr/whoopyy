@@ -792,3 +792,133 @@ class TestWorkoutZoneDurationNullable:
         assert zones.zone_three_milli == 900000
         assert zones.zone_four_milli == 300000
         assert zones.zone_five_milli == 60000
+
+
+# =============================================================================
+# Type Correctness Tests (new)
+# =============================================================================
+
+class TestRecoveryScoreTypeCorrectness:
+    """Tests for RecoveryScore field type corrections."""
+
+    def test_recovery_score_resting_hr_accepts_float(self) -> None:
+        """RecoveryScore.resting_heart_rate should accept a float value."""
+        score = RecoveryScore(
+            user_calibrating=False,
+            recovery_score=75.0,
+            resting_heart_rate=52.3,
+            hrv_rmssd_milli=65.0,
+        )
+        assert score.resting_heart_rate == 52.3
+
+    def test_recovery_score_hrv_accepts_zero(self) -> None:
+        """RecoveryScore.hrv_rmssd_milli should accept 0.0 (ge=0)."""
+        score = RecoveryScore(
+            user_calibrating=False,
+            recovery_score=75.0,
+            resting_heart_rate=52,
+            hrv_rmssd_milli=0.0,
+        )
+        assert score.hrv_rmssd_milli == 0.0
+
+
+class TestSleepScoreTypeCorrectness:
+    """Tests for SleepScore field type corrections."""
+
+    def test_sleep_score_respiratory_rate_accepts_zero(self) -> None:
+        """SleepScore.respiratory_rate should accept 0.0 (ge=0)."""
+        score = SleepScore(respiratory_rate=0.0)
+        assert score.respiratory_rate == 0.0
+
+
+def _make_cycle(**kwargs) -> Cycle:
+    defaults = dict(
+        id=1,
+        user_id=1,
+        created_at=datetime(2024, 1, 15, tzinfo=timezone.utc),
+        updated_at=datetime(2024, 1, 15, tzinfo=timezone.utc),
+        start=datetime(2024, 1, 15, tzinfo=timezone.utc),
+        timezone_offset="-05:00",
+        score_state="SCORED",
+    )
+    defaults.update(kwargs)
+    return Cycle(**defaults)
+
+
+def _make_recovery(**kwargs) -> Recovery:
+    defaults = dict(
+        cycle_id=1,
+        sleep_id="a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+        user_id=1,
+        created_at=datetime(2024, 1, 15, tzinfo=timezone.utc),
+        updated_at=datetime(2024, 1, 15, tzinfo=timezone.utc),
+        score_state="SCORED",
+    )
+    defaults.update(kwargs)
+    return Recovery(**defaults)
+
+
+def _make_sleep(**kwargs) -> Sleep:
+    defaults = dict(
+        id="a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+        cycle_id=1,
+        user_id=1,
+        created_at=datetime(2024, 1, 15, tzinfo=timezone.utc),
+        updated_at=datetime(2024, 1, 15, tzinfo=timezone.utc),
+        start=datetime(2024, 1, 15, 22, 0, tzinfo=timezone.utc),
+        end=datetime(2024, 1, 16, 6, 0, tzinfo=timezone.utc),
+        timezone_offset="-05:00",
+        nap=False,
+        score_state="SCORED",
+    )
+    defaults.update(kwargs)
+    return Sleep(**defaults)
+
+
+def _make_workout(**kwargs) -> Workout:
+    defaults = dict(
+        id="a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+        user_id=1,
+        created_at=datetime(2024, 1, 15, tzinfo=timezone.utc),
+        updated_at=datetime(2024, 1, 15, tzinfo=timezone.utc),
+        start=datetime(2024, 1, 15, 10, 0, tzinfo=timezone.utc),
+        end=datetime(2024, 1, 15, 11, 0, tzinfo=timezone.utc),
+        timezone_offset="-05:00",
+        sport_id=0,
+        score_state="SCORED",
+    )
+    defaults.update(kwargs)
+    return Workout(**defaults)
+
+
+class TestScoreStateLiteral:
+    """Tests for score_state Literal type on all four models."""
+
+    def test_score_state_literal_valid(self) -> None:
+        """All three valid score_state values pass validation on all four models."""
+        for state in ("SCORED", "PENDING_SCORE", "UNSCORABLE"):
+            cycle = _make_cycle(score_state=state)
+            assert cycle.score_state == state
+
+            recovery = _make_recovery(score_state=state)
+            assert recovery.score_state == state
+
+            sleep = _make_sleep(score_state=state)
+            assert sleep.score_state == state
+
+            workout = _make_workout(score_state=state)
+            assert workout.score_state == state
+
+    def test_score_state_literal_invalid(self) -> None:
+        """Invalid score_state value raises ValidationError on all four models."""
+        with pytest.raises(ValidationError):
+            _make_cycle(score_state="INVALID_STATE")
+
+        with pytest.raises(ValidationError):
+            _make_recovery(score_state="INVALID_STATE")
+
+        with pytest.raises(ValidationError):
+            _make_sleep(score_state="INVALID_STATE")
+
+        with pytest.raises(ValidationError):
+            _make_workout(score_state="INVALID_STATE")

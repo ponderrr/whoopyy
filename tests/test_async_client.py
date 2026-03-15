@@ -40,6 +40,7 @@ def mock_auth():
     """Create a mock OAuth handler."""
     auth = Mock()
     auth.get_valid_token.return_value = "test_access_token"
+    auth.async_get_valid_token = AsyncMock(return_value="test_access_token")
     auth.has_valid_tokens.return_value = True
     auth.close = Mock()
     return auth
@@ -510,3 +511,16 @@ class TestAsyncRevokeAccess:
                 await async_client.revoke_access()
 
         assert exc_info.value.status_code == 400
+
+
+# =============================================================================
+# Auth Headers Coroutine Test
+# =============================================================================
+
+class TestGetAuthHeadersIsCoroutine:
+    """Test that _get_auth_headers is an async coroutine function."""
+
+    def test_get_auth_headers_is_coroutine(self, async_client) -> None:
+        """_get_auth_headers must be a coroutine function (async def)."""
+        import asyncio
+        assert asyncio.iscoroutinefunction(async_client._get_auth_headers) is True

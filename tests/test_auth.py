@@ -539,11 +539,162 @@ class TestContextManager:
 
 class TestRepr:
     """Tests for string representation."""
-    
+
     def test_repr(self, oauth_handler: OAuthHandler) -> None:
         """Test __repr__ output."""
         repr_str = repr(oauth_handler)
-        
+
         assert "OAuthHandler" in repr_str
         assert "test_cli" in repr_str  # First 8 chars of client_id
         assert "localhost:8080" in repr_str
+
+
+# =============================================================================
+# Concurrent Token Refresh Tests
+# =============================================================================
+
+class TestConcurrentTokenRefresh:
+    """Tests for thread-safe and async-safe token refresh."""
+
+    def _make_expired_handler(self):
+        """Helper: OAuthHandler with an already-expired token."""
+        handler = OAuthHandler(
+            client_id="test_client_id",
+            client_secret="test_client_secret",
+        )
+        handler._tokens = {
+            "access_token": "old_token",
+            "refresh_token": "test_refresh_token",
+            "expires_in": 3600,
+            "expires_at": time.time() - 100,  # Expired
+            "token_type": "Bearer",
+            "scope": "offline",
+        }
+        return handler
+
+    def test_concurrent_refresh_issues_one_request(self) -> None:
+        """10 threads simultaneously on expired token should only call refresh once."""
+        import threading
+        from unittest.mock import patch, Mock
+
+        handler = self._make_expired_handler()
+        call_count = {"n": 0}
+        new_token_data = {
+            "access_token": "new_token",
+            "refresh_token": "test_refresh_token",
+            "expires_in": 3600,
+            "expires_at": time.time() + 3600,
+            "token_type": "Bearer",
+            "scope": "offline",
+        }
+
+        original_refresh = handler.refresh_access_token
+
+        def counting_refresh(*args, **kwargs):
+            call_count["n"] += 1
+            handler._tokens = new_token_data
+            return new_token_data
+
+        handler.refresh_access_token = counting_refresh
+
+        results = []
+        errors = []
+
+        def call_get_valid_token():
+            try:
+                results.append(handler.get_valid_token())
+            except Exception as e:
+                errors.append(e)
+
+        threads = [threading.Thread(target=call_get_valid_token) for _ in range(10)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert not errors, f"Unexpected errors: {errors}"
+        assert call_count["n"] == 1, (
+            f"Expected refresh called exactly once, got {call_count['n']}"
+        )
+
+    def test_second_caller_uses_refreshed_token(self) -> None:
+        """After first thread refreshes, all threads should return the new token."""
+        import threading
+
+        handler = self._make_expired_handler()
+        refreshed_token = "refreshed_access_token"
+        new_token_data = {
+            "access_token": refreshed_token,
+            "refresh_token": "test_refresh_token",
+            "expires_in": 3600,
+            "expires_at": time.time() + 3600,
+            "token_type": "Bearer",
+            "scope": "offline",
+        }
+
+        def counting_refresh(*args, **kwargs):
+            handler._tokens = new_token_data
+            return new_token_data
+
+        handler.refresh_access_token = counting_refresh
+
+        results = []
+
+        def call_get_valid_token():
+            results.append(handler.get_valid_token())
+
+        threads = [threading.Thread(target=call_get_valid_token) for _ in range(10)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert all(token == refreshed_token for token in results), (
+            f"Not all threads returned the refreshed token: {results}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_async_get_valid_token_uses_asyncio_lock(self) -> None:
+        """10 concurrent async calls on expired token should only refresh once."""
+        import asyncio
+        from unittest.mock import AsyncMock, patch
+
+        handler = OAuthHandler(
+            client_id="test_client_id",
+            client_secret="test_client_secret",
+        )
+        handler._tokens = {
+            "access_token": "old_token",
+            "refresh_token": "test_refresh_token",
+            "expires_in": 3600,
+            "expires_at": time.time() - 100,  # Expired
+            "token_type": "Bearer",
+            "scope": "offline",
+        }
+
+        call_count = {"n": 0}
+        new_token_data = {
+            "access_token": "async_new_token",
+            "refresh_token": "test_refresh_token",
+            "expires_in": 3600,
+            "expires_at": time.time() + 3600,
+            "token_type": "Bearer",
+            "scope": "offline",
+        }
+
+        async def counting_async_refresh(*args, **kwargs):
+            call_count["n"] += 1
+            handler._tokens = new_token_data
+
+        handler._async_refresh_access_token = counting_async_refresh
+
+        tokens = await asyncio.gather(
+            *[handler.async_get_valid_token() for _ in range(10)]
+        )
+
+        assert call_count["n"] == 1, (
+            f"Expected async refresh called exactly once, got {call_count['n']}"
+        )
+        assert all(t == "async_new_token" for t in tokens), (
+            f"Not all coroutines returned the new token: {tokens}"
+        )

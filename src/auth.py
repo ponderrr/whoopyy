@@ -22,7 +22,9 @@ Example:
     >>> token = auth.get_valid_token()
 """
 
+import asyncio
 import secrets
+import threading
 import webbrowser
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import List, Optional
@@ -303,6 +305,7 @@ class OAuthHandler:
         # Internal state
         self._tokens: Optional[TokenData] = None
         self._http_client = httpx.Client(timeout=timeout)
+        self._refresh_lock = threading.Lock()
         
         logger.info(
             "OAuth handler initialized",
@@ -675,20 +678,125 @@ class OAuthHandler:
         # Load tokens if not in memory
         if self._tokens is None:
             self._tokens = load_tokens(self.token_file)
-        
+
         # No tokens available
         if self._tokens is None:
             raise WhoopTokenError(
                 "No tokens available. Please call authorize() first."
             )
-        
-        # Check if token is expired or about to expire
-        if is_token_expired(self._tokens):
-            logger.info("Access token expired, refreshing")
-            self._tokens = self.refresh_access_token()
-        
+
+        # Check if token is expired or about to expire (thread-safe)
+        with self._refresh_lock:
+            if is_token_expired(self._tokens):
+                logger.info("Access token expired, refreshing")
+                self.refresh_access_token()
+
         return self._tokens["access_token"]
     
+    async def async_get_valid_token(self) -> str:
+        """
+        Get a valid access token asynchronously, refreshing if needed.
+
+        Uses an asyncio.Lock to prevent concurrent coroutines from issuing
+        multiple simultaneous refresh requests.
+
+        Returns:
+            Valid access token string.
+
+        Raises:
+            WhoopTokenError: If no tokens available or refresh fails.
+        """
+        if not hasattr(self, "_async_refresh_lock"):
+            self._async_refresh_lock = asyncio.Lock()
+
+        # Load tokens if not in memory
+        if self._tokens is None:
+            self._tokens = load_tokens(self.token_file)
+
+        if self._tokens is None:
+            raise WhoopTokenError(
+                "No tokens available. Please call authorize() first."
+            )
+
+        async with self._async_refresh_lock:
+            if is_token_expired(self._tokens):
+                logger.info("Access token expired, refreshing (async)")
+                await self._async_refresh_access_token()
+
+        return self._tokens["access_token"]
+
+    async def _async_refresh_access_token(
+        self,
+        refresh_token: Optional[str] = None,
+    ) -> None:
+        """
+        Async version of refresh_access_token() using httpx.AsyncClient.
+
+        Args:
+            refresh_token: Refresh token to use. If None, uses stored token.
+
+        Raises:
+            WhoopTokenError: If refresh fails or no refresh token available.
+        """
+        logger.info("Refreshing access token (async)")
+
+        if refresh_token is None:
+            refresh_token = self._get_stored_refresh_token()
+
+        data = {
+            "grant_type": "refresh_token",
+            "refresh_token": refresh_token,
+            "client_id": self.client_id,
+            "client_secret": self.client_secret,
+            "scope": " ".join(self.scope),
+        }
+
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(OAUTH_TOKEN_URL, data=data)
+            response.raise_for_status()
+
+            token_response = response.json()
+
+            tokens: TokenData = {
+                "access_token": token_response["access_token"],
+                "refresh_token": token_response.get(
+                    "refresh_token", refresh_token
+                ),
+                "expires_in": token_response["expires_in"],
+                "expires_at": calculate_expiry(token_response["expires_in"]),
+                "token_type": token_response.get("token_type", "Bearer"),
+                "scope": token_response.get("scope", " ".join(self.scope)),
+            }
+
+            self._tokens = tokens
+            save_tokens(tokens, self.token_file)
+
+            logger.info(
+                "Async token refresh successful",
+                extra={"expires_in": tokens["expires_in"]},
+            )
+
+        except httpx.HTTPStatusError as e:
+            error_detail = e.response.text
+            logger.error(
+                "Async token refresh failed",
+                extra={
+                    "status_code": e.response.status_code,
+                    "error": error_detail,
+                },
+            )
+            raise WhoopTokenError(
+                f"Token refresh failed: {error_detail}",
+                status_code=e.response.status_code,
+            )
+        except httpx.RequestError as e:
+            logger.error(
+                "Async token refresh request error",
+                extra={"error": str(e)},
+            )
+            raise WhoopTokenError(f"Token refresh request failed: {e}")
+
     def has_valid_tokens(self) -> bool:
         """
         Check if valid tokens are available.

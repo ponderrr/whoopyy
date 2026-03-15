@@ -224,14 +224,14 @@ class AsyncWhoopClient:
     # Internal Request Methods
     # =========================================================================
     
-    def _get_auth_headers(self) -> Dict[str, str]:
+    async def _get_auth_headers(self) -> Dict[str, str]:
         """
-        Get request headers with valid access token.
-        
+        Get request headers with valid access token (non-blocking).
+
         Returns:
             Headers dict with Authorization header.
         """
-        token = self.auth.get_valid_token()
+        token = await self.auth.async_get_valid_token()
         return {"Authorization": f"Bearer {token}"}
     
     async def _request(
@@ -259,8 +259,8 @@ class AsyncWhoopClient:
             WhoopAuthError: If authentication fails (401).
         """
         try:
-            headers = self._get_auth_headers()
-            
+            headers = await self._get_auth_headers()
+
             logger.debug(
                 "Making async API request",
                 extra={
@@ -925,7 +925,7 @@ class AsyncWhoopClient:
         """
         logger.info("Revoking access token")
 
-        token = self.auth.get_valid_token()
+        token = await self.auth.async_get_valid_token()
         revoke_url = f"{AUTH_BASE_URL}/oauth2/revoke"
 
         response = await self._http_client.post(

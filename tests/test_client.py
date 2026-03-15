@@ -666,3 +666,51 @@ class TestRepr:
         assert "WhoopClient" in repr_str
         assert "test_cli" in repr_str  # First 8 chars of client_id
         assert "authenticated=False" in repr_str
+
+
+# =============================================================================
+# Revoke Access Tests
+# =============================================================================
+
+class TestRevokeAccess:
+    """Tests for revoke_access() method."""
+
+    def test_revoke_access_sends_post(self, client, mock_auth) -> None:
+        """Test that revoke_access() POSTs to the correct OAuth revocation URL."""
+        mock_response = Mock()
+        mock_response.status_code = 200
+
+        with patch.object(client._http_client, "post", return_value=mock_response) as mock_post:
+            client.revoke_access()
+
+        mock_post.assert_called_once()
+        call_args = mock_post.call_args
+        url = call_args[0][0] if call_args[0] else call_args[1].get("url", call_args[0][0])
+        # First positional argument is the URL
+        assert "/oauth/oauth2/revoke" in call_args[0][0]
+
+    def test_revoke_access_clears_tokens(self, client, mock_auth) -> None:
+        """Test that revoke_access() clears stored tokens on success."""
+        mock_response = Mock()
+        mock_response.status_code = 200
+
+        # Give auth handler some tokens to be cleared
+        mock_auth._tokens = {"access_token": "test_access_token"}
+
+        with patch.object(client._http_client, "post", return_value=mock_response):
+            client.revoke_access()
+
+        assert mock_auth._tokens is None
+        assert client._authenticated is False
+
+    def test_revoke_access_raises_on_error(self, client, mock_auth) -> None:
+        """Test that revoke_access() raises WhoopAuthError on non-200 response."""
+        mock_response = Mock()
+        mock_response.status_code = 400
+        mock_response.text = "invalid_token"
+
+        with patch.object(client._http_client, "post", return_value=mock_response):
+            with pytest.raises(WhoopAuthError) as exc_info:
+                client.revoke_access()
+
+        assert exc_info.value.status_code == 400

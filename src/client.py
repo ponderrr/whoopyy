@@ -46,6 +46,7 @@ import httpx
 from .auth import OAuthHandler
 from .constants import (
     API_BASE_URL,
+    AUTH_BASE_URL,
     DEFAULT_TIMEOUT_SECONDS,
     DEFAULT_TOKEN_FILE,
     ENDPOINTS,
@@ -1146,10 +1147,27 @@ class WhoopClient:
             >>> # User must re-authenticate to continue
         """
         logger.info("Revoking access token")
-        
-        self._request("DELETE", ENDPOINTS["user_access_revoke"])
+
+        token = self.auth.get_valid_token()
+        revoke_url = f"{AUTH_BASE_URL}/oauth2/revoke"
+
+        response = self._http_client.post(
+            revoke_url,
+            data={"token": token},
+            headers={
+                "Content-Type": "application/x-www-form-urlencoded",
+            },
+        )
+
+        if response.status_code != 200:
+            raise WhoopAuthError(
+                f"Token revocation failed with status {response.status_code}: {response.text}",
+                status_code=response.status_code,
+            )
+
+        self.auth._tokens = None
         self._authenticated = False
-        
+
         logger.info("Access token revoked")
     
     # =========================================================================

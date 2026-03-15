@@ -922,3 +922,165 @@ class TestScoreStateLiteral:
 
         with pytest.raises(ValidationError):
             _make_workout(score_state="INVALID_STATE")
+
+
+# =============================================================================
+# ISO8601 Deserialization Tests
+# =============================================================================
+
+class TestISO8601Deserialization:
+    """Tests that Pydantic models correctly parse ISO8601 datetime strings."""
+
+    # ---- Cycle ----
+
+    def test_cycle_deserializes_iso_string_dates(self) -> None:
+        """Cycle should parse ISO8601 string dates to datetime objects."""
+        cycle = Cycle(
+            id=1,
+            user_id=456,
+            created_at="2024-01-15T08:30:00.000Z",
+            updated_at="2024-01-15T20:00:00.000Z",
+            start="2024-01-15T08:00:00.000Z",
+            end=None,
+            timezone_offset="-05:00",
+            score_state="PENDING_SCORE",
+            score=None,
+        )
+        assert isinstance(cycle.created_at, datetime)
+        assert isinstance(cycle.updated_at, datetime)
+        assert isinstance(cycle.start, datetime)
+        assert cycle.created_at.year == 2024
+        assert cycle.created_at.month == 1
+        assert cycle.created_at.day == 15
+
+    def test_cycle_with_end_deserializes_iso_string(self) -> None:
+        """Cycle.end should also parse ISO8601 string to datetime."""
+        cycle = Cycle(
+            id=2,
+            user_id=1,
+            created_at="2024-06-01T06:00:00.000Z",
+            updated_at="2024-06-01T23:00:00.000Z",
+            start="2024-06-01T06:00:00.000Z",
+            end="2024-06-01T23:00:00.000Z",
+            timezone_offset="+00:00",
+            score_state="SCORED",
+            score=None,
+        )
+        assert isinstance(cycle.end, datetime)
+        assert cycle.end.day == 1
+
+    # ---- Sleep ----
+
+    def test_sleep_deserializes_iso_string_dates(self) -> None:
+        """Sleep should parse ISO8601 string dates to datetime objects."""
+        sleep = Sleep(
+            id="a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+            cycle_id=100,
+            user_id=456,
+            created_at="2024-03-10T08:00:00.000Z",
+            updated_at="2024-03-10T08:05:00.000Z",
+            start="2024-03-09T22:30:00.000Z",
+            end="2024-03-10T06:30:00.000Z",
+            timezone_offset="-05:00",
+            nap=False,
+            score_state="SCORED",
+            score=None,
+        )
+        assert isinstance(sleep.created_at, datetime)
+        assert isinstance(sleep.updated_at, datetime)
+        assert isinstance(sleep.start, datetime)
+        assert isinstance(sleep.end, datetime)
+        assert sleep.start.hour == 22
+        assert sleep.end.hour == 6
+
+    def test_sleep_iso_with_milliseconds(self) -> None:
+        """Sleep should parse ISO8601 timestamps with milliseconds."""
+        sleep = Sleep(
+            id="b2c3d4e5-f6a7-8901-bcde-f12345678901",
+            cycle_id=200,
+            user_id=1,
+            created_at="2024-07-20T14:23:45.123Z",
+            updated_at="2024-07-20T14:23:45.456Z",
+            start="2024-07-19T23:00:00.000Z",
+            end="2024-07-20T07:00:00.000Z",
+            timezone_offset="+01:00",
+            nap=False,
+            score_state="SCORED",
+            score=None,
+        )
+        assert isinstance(sleep.created_at, datetime)
+        assert sleep.created_at.year == 2024
+        assert sleep.created_at.month == 7
+
+    # ---- Recovery ----
+
+    def test_recovery_deserializes_iso_string_dates(self) -> None:
+        """Recovery should parse ISO8601 string dates to datetime objects."""
+        recovery = Recovery(
+            cycle_id=123,
+            sleep_id="a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+            user_id=789,
+            created_at="2024-01-15T08:00:00.000Z",
+            updated_at="2024-01-15T08:30:00.000Z",
+            score_state="SCORED",
+            score=None,
+        )
+        assert isinstance(recovery.created_at, datetime)
+        assert isinstance(recovery.updated_at, datetime)
+        assert recovery.created_at.year == 2024
+        assert recovery.updated_at.minute == 30
+
+    def test_recovery_iso_utc_offset_notation(self) -> None:
+        """Recovery should handle +00:00 UTC offset notation."""
+        recovery = Recovery(
+            cycle_id=200,
+            sleep_id="a1b2c3d4-e5f6-7890-abcd-ef9876543210",
+            user_id=1,
+            created_at="2024-05-01T12:00:00+00:00",
+            updated_at="2024-05-01T12:01:00+00:00",
+            score_state="PENDING_SCORE",
+            score=None,
+        )
+        assert isinstance(recovery.created_at, datetime)
+        assert recovery.created_at.hour == 12
+
+    # ---- Workout ----
+
+    def test_workout_deserializes_iso_string_dates(self) -> None:
+        """Workout should parse ISO8601 string dates to datetime objects."""
+        workout = Workout(
+            id="c3d4e5f6-a7b8-9012-cdef-123456789012",
+            user_id=456,
+            created_at="2024-02-20T10:00:00.000Z",
+            updated_at="2024-02-20T11:00:00.000Z",
+            start="2024-02-20T10:00:00.000Z",
+            end="2024-02-20T11:00:00.000Z",
+            timezone_offset="-08:00",
+            sport_id=44,
+            score_state="SCORED",
+            score=None,
+        )
+        assert isinstance(workout.created_at, datetime)
+        assert isinstance(workout.updated_at, datetime)
+        assert isinstance(workout.start, datetime)
+        assert isinstance(workout.end, datetime)
+        assert workout.start.hour == 10
+        assert workout.end.hour == 11
+
+    def test_workout_iso_no_milliseconds(self) -> None:
+        """Workout should handle ISO8601 without milliseconds."""
+        workout = Workout(
+            id="d4e5f6a7-b8c9-0123-defa-234567890123",
+            user_id=1,
+            created_at="2024-09-15T09:00:00+00:00",
+            updated_at="2024-09-15T10:00:00+00:00",
+            start="2024-09-15T09:00:00+00:00",
+            end="2024-09-15T10:00:00+00:00",
+            timezone_offset="+00:00",
+            sport_id=0,
+            score_state="SCORED",
+            score=None,
+        )
+        assert isinstance(workout.start, datetime)
+        assert workout.start.year == 2024
+        assert workout.start.month == 9

@@ -668,3 +668,214 @@ class TestGetAuthHeadersIsCoroutine:
         """_get_auth_headers must be a coroutine function (async def)."""
         import asyncio
         assert asyncio.iscoroutinefunction(async_client._get_auth_headers) is True
+
+
+# =============================================================================
+# Async Sleep Pagination Tests
+# =============================================================================
+
+class TestAsyncSleepPagination:
+    """Tests for async sleep collection pagination."""
+
+    def _make_sleep_record(self, idx: int) -> dict:
+        return {
+            "id": f"async-sleep-{idx:04d}",
+            "cycle_id": idx,
+            "user_id": 1,
+            "created_at": "2024-01-15T08:00:00.000Z",
+            "updated_at": "2024-01-15T08:30:00.000Z",
+            "start": "2024-01-14T22:30:00.000Z",
+            "end": "2024-01-15T06:30:00.000Z",
+            "timezone_offset": "-05:00",
+            "nap": False,
+            "score_state": "SCORED",
+            "score": None,
+        }
+
+    @pytest.mark.asyncio
+    async def test_get_sleep_collection_single_page(self, async_client):
+        """Async single-page sleep collection returns all items with one HTTP call."""
+        page = {
+            "records": [self._make_sleep_record(i) for i in range(3)],
+            "next_token": None,
+        }
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.raise_for_status = Mock()
+        mock_response.json.return_value = page
+
+        async_client._http_client.request = AsyncMock(return_value=mock_response)
+
+        from whoopyy.models import SleepCollection
+        collection = await async_client.get_sleep_collection(limit=10)
+
+        assert isinstance(collection, SleepCollection)
+        assert len(collection.records) == 3
+        assert collection.next_token is None
+        async_client._http_client.request.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_get_sleep_collection_two_pages(self, async_client):
+        """Async two-page sleep collection yields records from both pages."""
+        page1 = {
+            "records": [self._make_sleep_record(i) for i in range(2)],
+            "next_token": "tok1",
+        }
+        page2 = {
+            "records": [self._make_sleep_record(i) for i in range(2, 4)],
+            "next_token": None,
+        }
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.raise_for_status = Mock()
+        mock_response.json.side_effect = [page1, page2]
+
+        async_client._http_client.request = AsyncMock(return_value=mock_response)
+
+        all_sleeps = await async_client.get_all_sleep()
+
+        assert len(all_sleeps) == 4
+        assert async_client._http_client.request.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_get_all_sleep_follows_pagination(self, async_client):
+        """Async get_all_sleep aggregates across three pages."""
+        pages = [
+            {"records": [self._make_sleep_record(i) for i in range(5)], "next_token": "p2"},
+            {"records": [self._make_sleep_record(i) for i in range(5, 10)], "next_token": "p3"},
+            {"records": [self._make_sleep_record(i) for i in range(10, 12)], "next_token": None},
+        ]
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.raise_for_status = Mock()
+        mock_response.json.side_effect = pages
+
+        async_client._http_client.request = AsyncMock(return_value=mock_response)
+
+        all_sleeps = await async_client.get_all_sleep()
+
+        assert len(all_sleeps) == 12
+        assert async_client._http_client.request.call_count == 3
+
+
+# =============================================================================
+# Async Cycle Pagination Tests
+# =============================================================================
+
+class TestAsyncCyclePagination:
+    """Tests for async cycle collection pagination."""
+
+    def _make_cycle_record(self, idx: int) -> dict:
+        return {
+            "id": idx,
+            "user_id": 1,
+            "created_at": "2024-01-15T08:00:00.000Z",
+            "updated_at": "2024-01-15T08:00:00.000Z",
+            "start": "2024-01-15T08:00:00.000Z",
+            "end": "2024-01-16T08:00:00.000Z",
+            "timezone_offset": "-05:00",
+            "score_state": "SCORED",
+            "score": None,
+        }
+
+    @pytest.mark.asyncio
+    async def test_get_cycle_collection_basic(self, async_client):
+        """Async single-page cycle collection deserializes to Cycle objects."""
+        page = {
+            "records": [self._make_cycle_record(i) for i in range(1, 4)],
+            "next_token": None,
+        }
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.raise_for_status = Mock()
+        mock_response.json.return_value = page
+
+        async_client._http_client.request = AsyncMock(return_value=mock_response)
+
+        from whoopyy.models import CycleCollection, Cycle
+        collection = await async_client.get_cycle_collection(limit=10)
+
+        assert isinstance(collection, CycleCollection)
+        assert len(collection.records) == 3
+        assert all(isinstance(c, Cycle) for c in collection.records)
+
+    @pytest.mark.asyncio
+    async def test_get_all_cycles_multi_page(self, async_client):
+        """Async get_all_cycles fetches two pages and combines results."""
+        pages = [
+            {"records": [self._make_cycle_record(i) for i in range(1, 4)], "next_token": "next"},
+            {"records": [self._make_cycle_record(i) for i in range(4, 7)], "next_token": None},
+        ]
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.raise_for_status = Mock()
+        mock_response.json.side_effect = pages
+
+        async_client._http_client.request = AsyncMock(return_value=mock_response)
+
+        cycles = await async_client.get_all_cycles()
+
+        assert len(cycles) == 6
+        assert async_client._http_client.request.call_count == 2
+
+
+# =============================================================================
+# Async Workout Pagination Tests
+# =============================================================================
+
+class TestAsyncWorkoutPagination:
+    """Tests for async workout collection pagination."""
+
+    def _make_workout_record(self, idx: int) -> dict:
+        return {
+            "id": f"async-workout-{idx:04d}",
+            "user_id": 1,
+            "created_at": "2024-01-15T10:00:00.000Z",
+            "updated_at": "2024-01-15T11:00:00.000Z",
+            "start": "2024-01-15T10:00:00.000Z",
+            "end": "2024-01-15T11:00:00.000Z",
+            "timezone_offset": "-05:00",
+            "sport_id": 44,
+            "score_state": "SCORED",
+            "score": None,
+        }
+
+    @pytest.mark.asyncio
+    async def test_get_workout_collection_basic(self, async_client):
+        """Async single-page workout collection deserializes to Workout objects."""
+        page = {
+            "records": [self._make_workout_record(i) for i in range(3)],
+            "next_token": None,
+        }
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.raise_for_status = Mock()
+        mock_response.json.return_value = page
+
+        async_client._http_client.request = AsyncMock(return_value=mock_response)
+
+        from whoopyy.models import WorkoutCollection, Workout
+        collection = await async_client.get_workout_collection(limit=10)
+
+        assert isinstance(collection, WorkoutCollection)
+        assert len(collection.records) == 3
+        assert all(w.sport_display_name == "Yoga" for w in collection.records)
+
+    @pytest.mark.asyncio
+    async def test_get_all_workouts_multi_page(self, async_client):
+        """Async get_all_workouts fetches two pages and combines results."""
+        pages = [
+            {"records": [self._make_workout_record(i) for i in range(4)], "next_token": "wt2"},
+            {"records": [self._make_workout_record(i) for i in range(4, 8)], "next_token": None},
+        ]
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.raise_for_status = Mock()
+        mock_response.json.side_effect = pages
+
+        async_client._http_client.request = AsyncMock(return_value=mock_response)
+
+        workouts = await async_client.get_all_workouts()
+
+        assert len(workouts) == 8
+        assert async_client._http_client.request.call_count == 2

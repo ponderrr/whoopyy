@@ -866,3 +866,359 @@ class TestRevokeAccess:
                 client.revoke_access()
 
         assert exc_info.value.status_code == 400
+
+
+# =============================================================================
+# Sleep Pagination Tests
+# =============================================================================
+
+class TestSleepPagination:
+    """Tests for sleep collection pagination."""
+
+    def _make_sleep_record(self, idx: int) -> dict:
+        return {
+            "id": f"sleep-uuid-{idx:04d}",
+            "cycle_id": idx,
+            "user_id": 1,
+            "created_at": "2024-01-15T08:00:00.000Z",
+            "updated_at": "2024-01-15T08:30:00.000Z",
+            "start": "2024-01-14T22:30:00.000Z",
+            "end": "2024-01-15T06:30:00.000Z",
+            "timezone_offset": "-05:00",
+            "nap": False,
+            "score_state": "SCORED",
+            "score": None,
+        }
+
+    def test_get_sleep_collection_single_page(self, client):
+        """Single page with no next_token returns all items in one HTTP call."""
+        page = {
+            "records": [self._make_sleep_record(i) for i in range(3)],
+            "next_token": None,
+        }
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.raise_for_status = Mock()
+        mock_response.json.return_value = page
+
+        with patch.object(
+            client._http_client, "request", return_value=mock_response
+        ) as mock_req:
+            collection = client.get_sleep_collection(limit=10)
+
+        assert isinstance(collection, SleepCollection)
+        assert len(collection.records) == 3
+        assert collection.next_token is None
+        mock_req.assert_called_once()
+
+    def test_get_sleep_collection_two_pages(self, client):
+        """Two-page response yields records from both pages."""
+        page1 = {
+            "records": [self._make_sleep_record(i) for i in range(2)],
+            "next_token": "tok1",
+        }
+        page2 = {
+            "records": [self._make_sleep_record(i) for i in range(2, 4)],
+            "next_token": None,
+        }
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.raise_for_status = Mock()
+        mock_response.json.side_effect = [page1, page2]
+
+        with patch.object(
+            client._http_client, "request", return_value=mock_response
+        ) as mock_req:
+            all_sleeps = client.get_all_sleep()
+
+        assert len(all_sleeps) == 4
+        assert mock_req.call_count == 2
+
+    def test_get_all_sleep_follows_pagination(self, client):
+        """get_all_sleep aggregates records across three pages."""
+        pages = [
+            {"records": [self._make_sleep_record(i) for i in range(5)], "next_token": "p2"},
+            {"records": [self._make_sleep_record(i) for i in range(5, 10)], "next_token": "p3"},
+            {"records": [self._make_sleep_record(i) for i in range(10, 13)], "next_token": None},
+        ]
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.raise_for_status = Mock()
+        mock_response.json.side_effect = pages
+
+        with patch.object(
+            client._http_client, "request", return_value=mock_response
+        ) as mock_req:
+            all_sleeps = client.get_all_sleep()
+
+        assert len(all_sleeps) == 13
+        assert mock_req.call_count == 3
+        assert all(isinstance(s, Sleep) for s in all_sleeps)
+
+
+# =============================================================================
+# Cycle Pagination Tests
+# =============================================================================
+
+class TestCyclePagination:
+    """Tests for cycle collection pagination."""
+
+    def _make_cycle_record(self, idx: int) -> dict:
+        return {
+            "id": idx,
+            "user_id": 1,
+            "created_at": "2024-01-15T08:00:00.000Z",
+            "updated_at": "2024-01-15T08:00:00.000Z",
+            "start": "2024-01-15T08:00:00.000Z",
+            "end": "2024-01-16T08:00:00.000Z",
+            "timezone_offset": "-05:00",
+            "score_state": "SCORED",
+            "score": None,
+        }
+
+    def test_get_cycle_collection_basic(self, client):
+        """Single-page cycle collection is deserialized to Cycle objects."""
+        page = {
+            "records": [self._make_cycle_record(i) for i in range(1, 4)],
+            "next_token": None,
+        }
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.raise_for_status = Mock()
+        mock_response.json.return_value = page
+
+        with patch.object(client._http_client, "request", return_value=mock_response):
+            collection = client.get_cycle_collection(limit=10)
+
+        assert isinstance(collection, CycleCollection)
+        assert len(collection.records) == 3
+        assert all(isinstance(c, Cycle) for c in collection.records)
+
+    def test_get_all_cycles_multi_page(self, client):
+        """get_all_cycles fetches two pages and returns combined list."""
+        pages = [
+            {"records": [self._make_cycle_record(i) for i in range(1, 4)], "next_token": "next"},
+            {"records": [self._make_cycle_record(i) for i in range(4, 7)], "next_token": None},
+        ]
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.raise_for_status = Mock()
+        mock_response.json.side_effect = pages
+
+        with patch.object(
+            client._http_client, "request", return_value=mock_response
+        ) as mock_req:
+            cycles = client.get_all_cycles()
+
+        assert len(cycles) == 6
+        assert mock_req.call_count == 2
+
+
+# =============================================================================
+# Workout Pagination Tests
+# =============================================================================
+
+class TestWorkoutPagination:
+    """Tests for workout collection pagination."""
+
+    def _make_workout_record(self, idx: int) -> dict:
+        return {
+            "id": f"workout-uuid-{idx:04d}",
+            "user_id": 1,
+            "created_at": "2024-01-15T10:00:00.000Z",
+            "updated_at": "2024-01-15T11:00:00.000Z",
+            "start": "2024-01-15T10:00:00.000Z",
+            "end": "2024-01-15T11:00:00.000Z",
+            "timezone_offset": "-05:00",
+            "sport_id": 44,
+            "score_state": "SCORED",
+            "score": None,
+        }
+
+    def test_get_workout_collection_basic(self, client):
+        """Single-page workout collection is deserialized to Workout objects."""
+        page = {
+            "records": [self._make_workout_record(i) for i in range(3)],
+            "next_token": None,
+        }
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.raise_for_status = Mock()
+        mock_response.json.return_value = page
+
+        with patch.object(client._http_client, "request", return_value=mock_response):
+            collection = client.get_workout_collection(limit=10)
+
+        assert isinstance(collection, WorkoutCollection)
+        assert len(collection.records) == 3
+        # sport_id=44 → Yoga
+        assert all(w.sport_display_name == "Yoga" for w in collection.records)
+
+    def test_get_all_workouts_multi_page(self, client):
+        """get_all_workouts fetches two pages and returns combined list."""
+        pages = [
+            {"records": [self._make_workout_record(i) for i in range(4)], "next_token": "wt2"},
+            {"records": [self._make_workout_record(i) for i in range(4, 8)], "next_token": None},
+        ]
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.raise_for_status = Mock()
+        mock_response.json.side_effect = pages
+
+        with patch.object(
+            client._http_client, "request", return_value=mock_response
+        ) as mock_req:
+            workouts = client.get_all_workouts()
+
+        assert len(workouts) == 8
+        assert mock_req.call_count == 2
+
+
+# =============================================================================
+# Iterator Tests
+# =============================================================================
+
+class TestIterators:
+    """Tests for generator-based iterators."""
+
+    def _make_sleep_record(self, idx: int) -> dict:
+        return {
+            "id": f"sleep-iter-{idx:04d}",
+            "cycle_id": idx,
+            "user_id": 1,
+            "created_at": "2024-01-15T08:00:00.000Z",
+            "updated_at": "2024-01-15T08:30:00.000Z",
+            "start": "2024-01-14T22:30:00.000Z",
+            "end": "2024-01-15T06:30:00.000Z",
+            "timezone_offset": "-05:00",
+            "nap": False,
+            "score_state": "SCORED",
+            "score": None,
+        }
+
+    def _make_cycle_record(self, idx: int) -> dict:
+        return {
+            "id": idx,
+            "user_id": 1,
+            "created_at": "2024-01-15T08:00:00.000Z",
+            "updated_at": "2024-01-15T08:00:00.000Z",
+            "start": "2024-01-15T08:00:00.000Z",
+            "end": "2024-01-16T08:00:00.000Z",
+            "timezone_offset": "-05:00",
+            "score_state": "SCORED",
+            "score": None,
+        }
+
+    def _make_recovery_record(self, idx: int) -> dict:
+        return {
+            "cycle_id": idx,
+            "sleep_id": f"a1b2c3d4-e5f6-7890-abcd-ef{idx:012d}",
+            "user_id": 1,
+            "created_at": "2024-01-15T08:00:00.000Z",
+            "updated_at": "2024-01-15T08:30:00.000Z",
+            "score_state": "SCORED",
+            "score": {
+                "user_calibrating": False,
+                "recovery_score": 70.0,
+                "resting_heart_rate": 52.0,
+                "hrv_rmssd_milli": 60.0,
+            },
+        }
+
+    def _make_workout_record(self, idx: int) -> dict:
+        return {
+            "id": f"workout-iter-{idx:04d}",
+            "user_id": 1,
+            "created_at": "2024-01-15T10:00:00.000Z",
+            "updated_at": "2024-01-15T11:00:00.000Z",
+            "start": "2024-01-15T10:00:00.000Z",
+            "end": "2024-01-15T11:00:00.000Z",
+            "timezone_offset": "-05:00",
+            "sport_id": 44,
+            "score_state": "SCORED",
+            "score": None,
+        }
+
+    def test_iter_sleep_yields_items(self, client):
+        """iter_sleep should yield all Sleep objects from a single page."""
+        page = {
+            "records": [self._make_sleep_record(i) for i in range(3)],
+            "next_token": None,
+        }
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.raise_for_status = Mock()
+        mock_response.json.return_value = page
+
+        with patch.object(client._http_client, "request", return_value=mock_response):
+            items = list(client.iter_sleep())
+
+        assert len(items) == 3
+        assert all(isinstance(s, Sleep) for s in items)
+
+    def test_iter_sleep_multi_page(self, client):
+        """iter_sleep should yield items across multiple pages."""
+        pages = [
+            {"records": [self._make_sleep_record(i) for i in range(3)], "next_token": "p2"},
+            {"records": [self._make_sleep_record(i) for i in range(3, 5)], "next_token": None},
+        ]
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.raise_for_status = Mock()
+        mock_response.json.side_effect = pages
+
+        with patch.object(client._http_client, "request", return_value=mock_response):
+            items = list(client.iter_sleep())
+
+        assert len(items) == 5
+
+    def test_iter_cycles_yields_items(self, client):
+        """iter_cycles should yield all Cycle objects from a single page."""
+        page = {
+            "records": [self._make_cycle_record(i) for i in range(1, 5)],
+            "next_token": None,
+        }
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.raise_for_status = Mock()
+        mock_response.json.return_value = page
+
+        with patch.object(client._http_client, "request", return_value=mock_response):
+            items = list(client.iter_cycles())
+
+        assert len(items) == 4
+        assert all(isinstance(c, Cycle) for c in items)
+
+    def test_iter_recovery_yields_items(self, client):
+        """iter_recovery should yield all Recovery objects."""
+        page = {
+            "records": [self._make_recovery_record(i) for i in range(1, 4)],
+            "next_token": None,
+        }
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.raise_for_status = Mock()
+        mock_response.json.return_value = page
+
+        with patch.object(client._http_client, "request", return_value=mock_response):
+            items = list(client.iter_recovery())
+
+        assert len(items) == 3
+        assert all(isinstance(r, Recovery) for r in items)
+
+    def test_iter_workouts_yields_items(self, client):
+        """iter_workouts should yield all Workout objects."""
+        page = {
+            "records": [self._make_workout_record(i) for i in range(5)],
+            "next_token": None,
+        }
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.raise_for_status = Mock()
+        mock_response.json.return_value = page
+
+        with patch.object(client._http_client, "request", return_value=mock_response):
+            items = list(client.iter_workouts())
+
+        assert len(items) == 5
+        assert all(isinstance(w, Workout) for w in items)

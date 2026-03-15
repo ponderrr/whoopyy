@@ -427,13 +427,21 @@ class OAuthHandler:
         
         # Create and run callback server
         server = HTTPServer(("localhost", port), _CallbackHandler)
-        
+        CALLBACK_TIMEOUT_SECONDS = 120
+        server.timeout = CALLBACK_TIMEOUT_SECONDS
+
         try:
-            # Handle single request (blocking)
+            # Handle single request (blocking, with timeout)
             server.handle_request()
         finally:
             server.server_close()
-        
+
+        if not _CallbackHandler.auth_code and not _CallbackHandler.error:
+            raise WhoopAuthError(
+                "OAuth callback timed out after 120 seconds. "
+                "Please restart the authorization flow."
+            )
+
         # Check for errors
         if _CallbackHandler.error:
             raise WhoopAuthError(

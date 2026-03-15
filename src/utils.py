@@ -16,6 +16,7 @@ Example:
 """
 
 import json
+import os
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -61,7 +62,8 @@ def save_tokens(
     try:
         with open(filepath, "w", encoding="utf-8") as f:
             json.dump(tokens, f, indent=2)
-        
+        os.chmod(filepath, 0o600)
+
         logger.info(
             "Tokens saved successfully",
             extra={"filepath": filepath}

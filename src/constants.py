@@ -5,6 +5,7 @@ This module contains all static configuration values used throughout the SDK.
 No magic numbers - all values are named constants with clear documentation.
 """
 
+import os
 from typing import Final
 
 # =============================================================================
@@ -108,8 +109,11 @@ This buffer ensures tokens are refreshed before they actually expire,
 preventing failed requests due to race conditions.
 """
 
-DEFAULT_TOKEN_FILE: Final[str] = ".whoop_tokens.json"
-"""Default filename for storing OAuth tokens locally."""
+DEFAULT_TOKEN_FILE: Final[str] = os.path.join(os.path.expanduser("~"), ".whoop_tokens.json")
+"""Default filename for storing OAuth tokens locally (absolute path in user home)."""
+
+TOKEN_FILE_PATH: Final[str] = DEFAULT_TOKEN_FILE
+"""Absolute path to the OAuth token file in the user's home directory."""
 
 # =============================================================================
 # HTTP Configuration

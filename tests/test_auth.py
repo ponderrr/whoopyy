@@ -143,13 +143,15 @@ class TestOAuthHandlerInit:
             )
     
     def test_default_token_file(self) -> None:
-        """Test default token file path."""
+        """Test default token file path is absolute and in home directory."""
+        import os
         handler = OAuthHandler(
             client_id="test_id",
             client_secret="test_secret",
         )
-        
-        assert handler.token_file == ".whoop_tokens.json"
+
+        assert handler.token_file == os.path.join(os.path.expanduser("~"), ".whoop_tokens.json")
+        assert handler.token_file.startswith("/")
         handler.close()
     
     def test_custom_token_file(self) -> None:
@@ -698,3 +700,51 @@ class TestConcurrentTokenRefresh:
         assert all(t == "async_new_token" for t in tokens), (
             f"Not all coroutines returned the new token: {tokens}"
         )
+
+
+# =============================================================================
+# Security and Timeout Tests
+# =============================================================================
+
+def test_token_file_permissions(tmp_path):
+    """Token file should be created with 600 permissions."""
+    import os
+    from whoopyy import utils
+    filepath = tmp_path / "tokens.json"
+    utils.save_tokens({"access_token": "x", "refresh_token": "y"}, filepath=str(filepath))
+    mode = oct(os.stat(filepath).st_mode & 0o777)
+    assert mode == "0o600"
+
+
+def test_callback_timeout_raises():
+    """If no callback received, WhoopAuthError should be raised."""
+    from unittest.mock import patch, MagicMock
+    from whoopyy.auth import OAuthHandler, _CallbackHandler
+    from whoopyy.exceptions import WhoopAuthError
+
+    handler = OAuthHandler(
+        client_id="test_client_id",
+        client_secret="test_client_secret",
+    )
+
+    # Simulate handle_request returning without setting auth_code (timeout)
+    def fake_handle_request():
+        # Do not set _CallbackHandler.auth_code — simulates timeout
+        pass
+
+    mock_server = MagicMock()
+    mock_server.handle_request.side_effect = fake_handle_request
+
+    with patch("whoopyy.auth._CallbackHandler.auth_code", None), \
+         patch("whoopyy.auth._CallbackHandler.error", None), \
+         patch("whoopyy.auth.HTTPServer", return_value=mock_server):
+        with pytest.raises(WhoopAuthError, match="timed out"):
+            handler._wait_for_callback("some_state")
+
+    handler.close()
+
+
+def test_token_file_path_is_absolute():
+    """TOKEN_FILE_PATH should be an absolute path."""
+    from whoopyy import constants
+    assert constants.TOKEN_FILE_PATH.startswith("/")

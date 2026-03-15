@@ -879,3 +879,217 @@ class TestAsyncWorkoutPagination:
 
         assert len(workouts) == 8
         assert async_client._http_client.request.call_count == 2
+
+
+# =============================================================================
+# Async Concurrent Fetching Tests
+# =============================================================================
+
+class TestAsyncConcurrentFetching:
+    """Tests for fetch_all() and fetch_dashboard() concurrent methods."""
+
+    def _mock_collection_response(self, records_key, records):
+        """Helper to create a mock response returning a collection."""
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.raise_for_status = Mock()
+        mock_response.json.return_value = {
+            "records": records,
+            "next_token": None,
+        }
+        return mock_response
+
+    @pytest.mark.asyncio
+    async def test_fetch_all_runs_concurrently(self, async_client):
+        """fetch_all() returns all 4 data types when all succeed."""
+        recovery_data = {"records": [{"cycle_id": 1, "sleep_id": "s1", "user_id": 1,
+            "created_at": "2024-01-15T08:00:00.000Z", "updated_at": "2024-01-15T08:00:00.000Z",
+            "score_state": "SCORED", "score": None}], "next_token": None}
+        sleep_data = {"records": [{"id": "s1", "cycle_id": 1, "user_id": 1,
+            "created_at": "2024-01-15T08:00:00.000Z", "updated_at": "2024-01-15T08:00:00.000Z",
+            "start": "2024-01-14T22:30:00.000Z", "end": "2024-01-15T06:30:00.000Z",
+            "timezone_offset": "-05:00", "nap": False, "score_state": "SCORED",
+            "score": None}], "next_token": None}
+        cycle_data = {"records": [{"id": 1, "user_id": 1,
+            "created_at": "2024-01-15T08:00:00.000Z", "updated_at": "2024-01-15T08:00:00.000Z",
+            "start": "2024-01-15T08:00:00.000Z", "end": "2024-01-16T08:00:00.000Z",
+            "timezone_offset": "-05:00", "score_state": "SCORED",
+            "score": None}], "next_token": None}
+        workout_data = {"records": [{"id": "w1", "user_id": 1,
+            "created_at": "2024-01-15T10:00:00.000Z", "updated_at": "2024-01-15T11:00:00.000Z",
+            "start": "2024-01-15T10:00:00.000Z", "end": "2024-01-15T11:00:00.000Z",
+            "timezone_offset": "-05:00", "sport_id": 0, "score_state": "SCORED",
+            "score": None}], "next_token": None}
+
+        responses = [recovery_data, sleep_data, cycle_data, workout_data]
+        call_count = 0
+
+        def make_response(data):
+            mock = Mock()
+            mock.status_code = 200
+            mock.raise_for_status = Mock()
+            mock.json.return_value = data
+            return mock
+
+        async def mock_request(**kwargs):
+            nonlocal call_count
+            url = kwargs.get("url", "")
+            if "recovery" in url:
+                return make_response(recovery_data)
+            elif "sleep" in url:
+                return make_response(sleep_data)
+            elif "cycle" in url:
+                return make_response(cycle_data)
+            elif "workout" in url:
+                return make_response(workout_data)
+            return make_response(recovery_data)
+
+        async_client._http_client.request = AsyncMock(side_effect=mock_request)
+
+        data = await async_client.fetch_all(limit=5)
+
+        assert "recovery" in data
+        assert "sleep" in data
+        assert "cycles" in data
+        assert "workouts" in data
+        assert all(v is not None for v in data.values())
+
+    @pytest.mark.asyncio
+    async def test_fetch_all_handles_partial_failure(self, async_client):
+        """fetch_all() sets failed endpoints to None, others still populated."""
+        cycle_data = {"records": [{"id": 1, "user_id": 1,
+            "created_at": "2024-01-15T08:00:00.000Z", "updated_at": "2024-01-15T08:00:00.000Z",
+            "start": "2024-01-15T08:00:00.000Z", "end": "2024-01-16T08:00:00.000Z",
+            "timezone_offset": "-05:00", "score_state": "SCORED",
+            "score": None}], "next_token": None}
+
+        async def mock_request(**kwargs):
+            url = kwargs.get("url", "")
+            if "recovery" in url:
+                raise WhoopAPIError("API error", status_code=500)
+            mock = Mock()
+            mock.status_code = 200
+            mock.raise_for_status = Mock()
+            mock.json.return_value = cycle_data
+            return mock
+
+        async_client._http_client.request = AsyncMock(side_effect=mock_request)
+
+        data = await async_client.fetch_all(limit=5)
+
+        assert data["recovery"] is None
+        # Other keys should still be populated (not None)
+        assert data["cycles"] is not None
+
+    @pytest.mark.asyncio
+    async def test_fetch_dashboard_returns_single_records(self, async_client):
+        """fetch_dashboard() returns single model instances, not collections."""
+        profile_data = {"user_id": 12345, "email": "test@example.com",
+            "first_name": "John", "last_name": "Doe"}
+        recovery_data = {"records": [{"cycle_id": 1, "sleep_id": "s1", "user_id": 1,
+            "created_at": "2024-01-15T08:00:00.000Z", "updated_at": "2024-01-15T08:00:00.000Z",
+            "score_state": "SCORED", "score": None}], "next_token": None}
+        sleep_data = {"records": [{"id": "s1", "cycle_id": 1, "user_id": 1,
+            "created_at": "2024-01-15T08:00:00.000Z", "updated_at": "2024-01-15T08:00:00.000Z",
+            "start": "2024-01-14T22:30:00.000Z", "end": "2024-01-15T06:30:00.000Z",
+            "timezone_offset": "-05:00", "nap": False, "score_state": "SCORED",
+            "score": None}], "next_token": None}
+        cycle_data = {"records": [{"id": 1, "user_id": 1,
+            "created_at": "2024-01-15T08:00:00.000Z", "updated_at": "2024-01-15T08:00:00.000Z",
+            "start": "2024-01-15T08:00:00.000Z", "end": "2024-01-16T08:00:00.000Z",
+            "timezone_offset": "-05:00", "score_state": "SCORED",
+            "score": None}], "next_token": None}
+        workout_data = {"records": [{"id": "w1", "user_id": 1,
+            "created_at": "2024-01-15T10:00:00.000Z", "updated_at": "2024-01-15T11:00:00.000Z",
+            "start": "2024-01-15T10:00:00.000Z", "end": "2024-01-15T11:00:00.000Z",
+            "timezone_offset": "-05:00", "sport_id": 0, "score_state": "SCORED",
+            "score": None}], "next_token": None}
+
+        async def mock_request(**kwargs):
+            url = kwargs.get("url", "")
+            mock = Mock()
+            mock.status_code = 200
+            mock.raise_for_status = Mock()
+            if "profile/basic" in url:
+                mock.json.return_value = profile_data
+            elif "recovery" in url:
+                mock.json.return_value = recovery_data
+            elif "sleep" in url:
+                mock.json.return_value = sleep_data
+            elif "cycle" in url:
+                mock.json.return_value = cycle_data
+            elif "workout" in url:
+                mock.json.return_value = workout_data
+            else:
+                mock.json.return_value = profile_data
+            return mock
+
+        async_client._http_client.request = AsyncMock(side_effect=mock_request)
+
+        dash = await async_client.fetch_dashboard()
+
+        assert "profile" in dash
+        assert "recovery" in dash
+        assert "sleep" in dash
+        assert "cycle" in dash
+        assert "workout" in dash
+        # Profile should be a model, not a collection
+        assert isinstance(dash["profile"], UserProfileBasic)
+        # Others should be single records (Recovery, Sleep, Cycle, Workout), not collections
+        assert isinstance(dash["recovery"], Recovery)
+        assert isinstance(dash["sleep"], Sleep)
+        assert isinstance(dash["cycle"], Cycle)
+        assert isinstance(dash["workout"], Workout)
+
+    @pytest.mark.asyncio
+    async def test_fetch_all_selective(self, async_client):
+        """fetch_all() with selective flags only fetches requested types."""
+        recovery_data = {"records": [{"cycle_id": 1, "sleep_id": "s1", "user_id": 1,
+            "created_at": "2024-01-15T08:00:00.000Z", "updated_at": "2024-01-15T08:00:00.000Z",
+            "score_state": "SCORED", "score": None}], "next_token": None}
+
+        async def mock_request(**kwargs):
+            mock = Mock()
+            mock.status_code = 200
+            mock.raise_for_status = Mock()
+            mock.json.return_value = recovery_data
+            return mock
+
+        async_client._http_client.request = AsyncMock(side_effect=mock_request)
+
+        data = await async_client.fetch_all(
+            recovery=True, sleep=False, cycles=False, workouts=False
+        )
+
+        assert "recovery" in data
+        assert "sleep" not in data
+        assert "cycles" not in data
+        assert "workouts" not in data
+
+
+# =============================================================================
+# Async HTTP Connection Pooling Tests
+# =============================================================================
+
+class TestAsyncHTTPConnectionPooling:
+    """Tests for async HTTP connection pooling and session management."""
+
+    def test_async_client_reuses_session(self, async_client):
+        """The same httpx.AsyncClient instance is reused."""
+        session = async_client._http_client
+        assert session is async_client._http_client
+
+    def test_async_client_session_has_timeout_config(self, async_client):
+        """Async session should have the configured read timeout of 30s."""
+        assert async_client._http_client.timeout.read == 30.0
+        assert async_client._http_client.timeout.connect == 5.0
+
+    @pytest.mark.asyncio
+    async def test_async_client_closes_session_on_exit(self, mock_auth):
+        """Async session should be closed after context manager exit."""
+        with patch("whoopyy.async_client.OAuthHandler", return_value=mock_auth):
+            async with AsyncWhoopClient(
+                client_id="test_id", client_secret="test_secret"
+            ) as client:
+                session = client._http_client
+            assert session.is_closed

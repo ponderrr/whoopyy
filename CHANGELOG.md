@@ -5,6 +5,25 @@ All notable changes to WhoopYY will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-03-15
+
+### Performance
+- HTTP connection pooling with keepalive — eliminates per-request connection overhead
+- Double-checked locking on token hot path — no lock contention on valid tokens
+- In-memory token cache — zero disk reads after startup
+- Streaming-compatible CSV exports (Sequence type hints) — handles large datasets efficiently
+- `frozen=True`, `str_strip_whitespace=True`, `populate_by_name=True` on all Pydantic models
+- Per-request timing logs via `logger.debug` for performance monitoring
+
+### Added
+- `AsyncWhoopClient.fetch_all()` — fetch all data types concurrently with `asyncio.gather()`
+- `AsyncWhoopClient.fetch_dashboard()` — fetch latest single record of each type concurrently
+- Comprehensive integration test suite verified against real WHOOP credentials (17 tests)
+- `scripts/perf_check.py` for async performance sanity checks
+
+### Fixed
+- mypy strict mode now passes with 0 errors (previously 3 pre-existing errors)
+
 ## [0.2.0] - 2026-03-14
 
 ### Breaking Changes

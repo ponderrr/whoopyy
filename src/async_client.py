@@ -38,12 +38,16 @@ Note:
     All API data fetching methods are async.
 """
 
+import asyncio
+
 from datetime import date, datetime
 from types import TracebackType
 from typing import Any, AsyncGenerator, Dict, List, Optional, Type, Union
 
 import httpx
+import time
 
+from . import __version__
 from .auth import OAuthHandler
 from .constants import (
     API_BASE_URL,
@@ -164,13 +168,19 @@ class AsyncWhoopClient:
             timeout=timeout,
         )
         
-        # Async HTTP client for API requests
+        # Async HTTP client for API requests with connection pooling
         self._http_client = httpx.AsyncClient(
             base_url=API_BASE_URL,
-            timeout=timeout,
+            timeout=httpx.Timeout(connect=5.0, read=30.0, write=10.0, pool=5.0),
+            limits=httpx.Limits(
+                max_connections=20,
+                max_keepalive_connections=10,
+                keepalive_expiry=30.0,
+            ),
             headers={
                 "Accept": "application/json",
                 "Content-Type": "application/json",
+                "User-Agent": f"whoopyy/{__version__}",
             },
         )
         
@@ -275,6 +285,7 @@ class AsyncWhoopClient:
                 }
             )
             
+            start = time.perf_counter()
             response = await self._http_client.request(
                 method=method,
                 url=endpoint,
@@ -282,7 +293,12 @@ class AsyncWhoopClient:
                 json=data,
                 headers=headers,
             )
-            
+            elapsed = time.perf_counter() - start
+            logger.debug(
+                "%s %s → %d (%.0fms)",
+                method.upper(), endpoint, response.status_code, elapsed * 1000,
+            )
+
             # Handle rate limiting
             if response.status_code == 429:
                 retry_after_header = response.headers.get("Retry-After", "60")
@@ -339,8 +355,9 @@ class AsyncWhoopClient:
             if response.status_code == 204:
                 return {}
             
-            return response.json()
-            
+            result: Dict[str, Any] = response.json()
+            return result
+
         except httpx.HTTPStatusError as e:
             logger.error(
                 "Async API request failed",
@@ -936,6 +953,79 @@ class AsyncWhoopClient:
             
             next_token = collection.next_token
     
+    # =========================================================================
+    # Concurrent Fetching
+    # =========================================================================
+
+    async def fetch_all(
+        self,
+        *,
+        recovery: bool = True,
+        sleep: bool = True,
+        cycles: bool = True,
+        workouts: bool = True,
+        limit: int = 10,
+    ) -> Dict[str, Any]:
+        """
+        Fetch multiple data types concurrently using asyncio.gather().
+
+        Returns a dict with keys: 'recovery', 'sleep', 'cycles', 'workouts'.
+        Only fetches the types requested (all True by default).
+        Failed fetches return None for that key.
+
+        Example:
+            async with AsyncWhoopClient(auth) as client:
+                data = await client.fetch_all(limit=7)
+                print(data["recovery"].records[0].score.recovery_score)
+        """
+        tasks: Dict[str, Any] = {}
+        if recovery:
+            tasks["recovery"] = self.get_recovery_collection(limit=limit)
+        if sleep:
+            tasks["sleep"] = self.get_sleep_collection(limit=limit)
+        if cycles:
+            tasks["cycles"] = self.get_cycle_collection(limit=limit)
+        if workouts:
+            tasks["workouts"] = self.get_workout_collection(limit=limit)
+
+        results = await asyncio.gather(*tasks.values(), return_exceptions=True)
+        output: Dict[str, Any] = {}
+        for key, result in zip(tasks.keys(), results):
+            if isinstance(result, Exception):
+                logger.error("fetch_all: %s failed: %s", key, result)
+                output[key] = None
+            else:
+                output[key] = result
+        return output
+
+    async def fetch_dashboard(self) -> Dict[str, Any]:
+        """
+        Fetch the most recent record of each type concurrently.
+
+        Optimized for dashboard display — returns single latest records.
+        Returns: {'profile', 'recovery', 'sleep', 'cycle', 'workout'}
+        — each a single model instance or None.
+        """
+        results = await asyncio.gather(
+            self.get_profile_basic(),
+            self.get_recovery_collection(limit=1),
+            self.get_sleep_collection(limit=1),
+            self.get_cycle_collection(limit=1),
+            self.get_workout_collection(limit=1),
+            return_exceptions=True,
+        )
+        labels = ["profile", "recovery", "sleep", "cycle", "workout"]
+        output: Dict[str, Any] = {}
+        for label, result in zip(labels, results):
+            if isinstance(result, Exception):
+                logger.warning("fetch_dashboard: %s unavailable: %s", label, result)
+                output[label] = None
+            elif hasattr(result, "records"):
+                output[label] = result.records[0] if result.records else None
+            else:
+                output[label] = result
+        return output
+
     # =========================================================================
     # Access Management
     # =========================================================================

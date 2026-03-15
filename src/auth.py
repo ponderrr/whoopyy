@@ -198,7 +198,7 @@ class _CallbackHandler(BaseHTTPRequestHandler):
 </html>
 """
     
-    def log_message(self, format: str, *args) -> None:
+    def log_message(self, format: str, *args: object) -> None:
         """Suppress default HTTP server logging."""
         # We use our own logger instead
         pass
@@ -699,8 +699,13 @@ class OAuthHandler:
                 "No tokens available. Please call authorize() first."
             )
 
-        # Check if token is expired or about to expire (thread-safe)
+        # Fast path — no lock needed if token is valid
+        if not is_token_expired(self._tokens):
+            return self._tokens["access_token"]
+
+        # Slow path — need to refresh, acquire lock
         with self._refresh_lock:
+            # Re-check after acquiring lock (another thread may have refreshed)
             if is_token_expired(self._tokens):
                 logger.info("Access token expired, refreshing")
                 self.refresh_access_token()
@@ -732,7 +737,13 @@ class OAuthHandler:
                 "No tokens available. Please call authorize() first."
             )
 
+        # Fast path — no lock needed if token is valid
+        if not is_token_expired(self._tokens):
+            return self._tokens["access_token"]
+
+        # Slow path — need to refresh, acquire lock
         async with self._async_refresh_lock:
+            # Re-check after acquiring lock (another coroutine may have refreshed)
             if is_token_expired(self._tokens):
                 logger.info("Access token expired, refreshing (async)")
                 await self._async_refresh_access_token()

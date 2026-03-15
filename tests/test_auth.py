@@ -940,3 +940,88 @@ class TestTokenRefreshRetry:
         )
         assert token == "current_token"
         handler.close()
+
+
+# =============================================================================
+# Token Cache and Locking Optimization Tests
+# =============================================================================
+
+class TestTokenCacheAndLocking:
+    """Tests for in-memory token cache and double-checked locking."""
+
+    def test_get_valid_token_no_disk_read_on_valid_token(self):
+        """get_valid_token() should NOT call load_tokens when tokens are in memory."""
+        handler = OAuthHandler(
+            client_id="test_client_id",
+            client_secret="test_client_secret",
+        )
+        handler._tokens = {
+            "access_token": "cached_token",
+            "refresh_token": "test_refresh",
+            "expires_in": 3600,
+            "expires_at": time.time() + 3600,
+            "token_type": "Bearer",
+            "scope": "offline",
+        }
+
+        with patch("whoopyy.auth.load_tokens") as mock_load:
+            token = handler.get_valid_token()
+
+        mock_load.assert_not_called()
+        assert token == "cached_token"
+        handler.close()
+
+    def test_double_checked_locking_fast_path(self):
+        """When token is valid, get_valid_token() should never call refresh."""
+        handler = OAuthHandler(
+            client_id="test_client_id",
+            client_secret="test_client_secret",
+        )
+        handler._tokens = {
+            "access_token": "valid_token",
+            "refresh_token": "test_refresh",
+            "expires_in": 3600,
+            "expires_at": time.time() + 3600,
+            "token_type": "Bearer",
+            "scope": "offline",
+        }
+
+        with patch.object(handler, "refresh_access_token") as mock_refresh:
+            for _ in range(5):
+                token = handler.get_valid_token()
+                assert token == "valid_token"
+
+        mock_refresh.assert_not_called()
+        handler.close()
+
+    def test_token_expiry_uses_buffer(self):
+        """Token expiring within buffer should be considered expired."""
+        from whoopyy.constants import TOKEN_REFRESH_BUFFER_SECONDS
+        from whoopyy.utils import is_token_expired
+
+        tokens = {
+            "access_token": "test",
+            "refresh_token": "test_refresh",
+            "expires_in": 3600,
+            "expires_at": time.time() + (TOKEN_REFRESH_BUFFER_SECONDS - 1),
+            "token_type": "Bearer",
+            "scope": "offline",
+        }
+
+        assert is_token_expired(tokens) is True
+
+    def test_token_not_expired_outside_buffer(self):
+        """Token expiring well after buffer should not be considered expired."""
+        from whoopyy.constants import TOKEN_REFRESH_BUFFER_SECONDS
+        from whoopyy.utils import is_token_expired
+
+        tokens = {
+            "access_token": "test",
+            "refresh_token": "test_refresh",
+            "expires_in": 3600,
+            "expires_at": time.time() + (TOKEN_REFRESH_BUFFER_SECONDS + 60),
+            "token_type": "Bearer",
+            "scope": "offline",
+        }
+
+        assert is_token_expired(tokens) is False

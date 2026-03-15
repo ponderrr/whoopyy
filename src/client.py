@@ -38,11 +38,15 @@ Context Manager:
     ...     # Resources automatically cleaned up
 """
 
+import time
+
 from datetime import date, datetime
 from types import TracebackType
 from typing import Any, Dict, Generator, List, Optional, Type, Union
 
 import httpx
+
+from . import __version__
 
 from .auth import OAuthHandler
 from .constants import (
@@ -163,13 +167,19 @@ class WhoopClient:
             timeout=timeout,
         )
         
-        # HTTP client for API requests
+        # HTTP client for API requests with connection pooling
         self._http_client = httpx.Client(
             base_url=API_BASE_URL,
-            timeout=timeout,
+            timeout=httpx.Timeout(connect=5.0, read=30.0, write=10.0, pool=5.0),
+            limits=httpx.Limits(
+                max_connections=10,
+                max_keepalive_connections=5,
+                keepalive_expiry=30.0,
+            ),
             headers={
                 "Accept": "application/json",
                 "Content-Type": "application/json",
+                "User-Agent": f"whoopyy/{__version__}",
             },
         )
         
@@ -293,6 +303,7 @@ class WhoopClient:
                 }
             )
             
+            start = time.perf_counter()
             response = self._http_client.request(
                 method=method,
                 url=endpoint,
@@ -300,7 +311,12 @@ class WhoopClient:
                 json=data,
                 headers=headers,
             )
-            
+            elapsed = time.perf_counter() - start
+            logger.debug(
+                "%s %s → %d (%.0fms)",
+                method.upper(), endpoint, response.status_code, elapsed * 1000,
+            )
+
             # Handle rate limiting (429)
             if response.status_code == 429:
                 retry_after_header = response.headers.get("Retry-After", "60")
@@ -362,8 +378,9 @@ class WhoopClient:
             if response.status_code == 204:
                 return {}
             
-            return response.json()
-            
+            result: Dict[str, Any] = response.json()
+            return result
+
         except httpx.HTTPStatusError as e:
             logger.error(
                 "API request failed",

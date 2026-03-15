@@ -99,7 +99,7 @@ class UserProfileBasic(BaseModel):
         Hello, John!
     """
     
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, str_strip_whitespace=True, populate_by_name=True)
     
     user_id: int = Field(..., description="Unique Whoop user identifier")
     email: str = Field(..., description="User's registered email address")
@@ -134,7 +134,7 @@ class BodyMeasurement(BaseModel):
         Height: 1.83m
     """
     
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, str_strip_whitespace=True, populate_by_name=True)
     
     height_meter: Optional[float] = Field(
         None, 
@@ -197,7 +197,7 @@ class RecoveryScore(BaseModel):
         HRV: 65.2ms
     """
     
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, str_strip_whitespace=True, populate_by_name=True)
     
     user_calibrating: bool = Field(
         ..., 
@@ -279,7 +279,7 @@ class Recovery(BaseModel):
         ...     print(f"Recovery: {recovery.score.recovery_score}%")
     """
     
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, str_strip_whitespace=True, populate_by_name=True)
     
     cycle_id: int = Field(..., description="Associated cycle ID")
     sleep_id: str = Field(..., description="Associated sleep ID (UUID)")
@@ -304,11 +304,11 @@ class Recovery(BaseModel):
 class RecoveryCollection(BaseModel):
     """
     Paginated collection of recovery records.
-    
+
     Attributes:
         records: List of Recovery records.
         next_token: Token for fetching next page (None if last page).
-    
+
     Example:
         >>> collection = client.get_recovery_collection(limit=10)
         >>> for recovery in collection.records:
@@ -319,7 +319,9 @@ class RecoveryCollection(BaseModel):
         ...         next_token=collection.next_token
         ...     )
     """
-    
+
+    model_config = ConfigDict(frozen=True, str_strip_whitespace=True, populate_by_name=True)
+
     records: List[Recovery] = Field(
         default_factory=list, 
         description="List of recovery records"
@@ -353,7 +355,7 @@ class SleepStage(BaseModel):
         Deep sleep: 30.0min
     """
     
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, str_strip_whitespace=True, populate_by_name=True)
     
     stage_id: int = Field(..., description="Stage ID: 0=awake, 1=light, 2=SWS, 3=REM")
     start_millis: int = Field(..., ge=0, description="Stage start in milliseconds")
@@ -383,7 +385,7 @@ class StageSummary(BaseModel):
     All durations are in milliseconds.
     """
     
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, str_strip_whitespace=True, populate_by_name=True)
     
     total_in_bed_time_milli: int = Field(0, description="Total time in bed")
     total_awake_time_milli: int = Field(0, description="Total time awake")
@@ -421,7 +423,7 @@ class SleepNeeded(BaseModel):
     All durations are in milliseconds.
     """
     
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, str_strip_whitespace=True, populate_by_name=True)
     
     baseline_milli: int = Field(0, description="Baseline sleep need")
     need_from_sleep_debt_milli: int = Field(0, description="Additional need from sleep debt")
@@ -457,7 +459,7 @@ class SleepScore(BaseModel):
         sleep_efficiency_percentage: Sleep efficiency score (0-100).
     """
     
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, str_strip_whitespace=True, populate_by_name=True)
     
     stage_summary: Optional[StageSummary] = Field(
         None,
@@ -557,7 +559,7 @@ class Sleep(BaseModel):
         Duration: 8.0h
     """
     
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, str_strip_whitespace=True, populate_by_name=True)
     
     id: str = Field(..., description="Unique sleep record ID (UUID)")
     cycle_id: int = Field(..., description="Associated cycle ID")
@@ -597,12 +599,14 @@ class Sleep(BaseModel):
 class SleepCollection(BaseModel):
     """
     Paginated collection of sleep records.
-    
+
     Attributes:
         records: List of Sleep records.
         next_token: Token for fetching next page (None if last page).
     """
-    
+
+    model_config = ConfigDict(frozen=True, str_strip_whitespace=True, populate_by_name=True)
+
     records: List[Sleep] = Field(
         default_factory=list,
         description="List of sleep records"
@@ -634,7 +638,7 @@ class CycleScore(BaseModel):
         kilojoule: Total energy expenditure in kilojoules.
     """
     
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, str_strip_whitespace=True, populate_by_name=True)
     
     strain: float = Field(
         ..., 
@@ -707,7 +711,7 @@ class Cycle(BaseModel):
         ...     print(f"Daily strain: {cycle.score.score}")
     """
     
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, str_strip_whitespace=True, populate_by_name=True)
     
     id: int = Field(..., description="Unique cycle ID")
     user_id: int = Field(..., description="User's unique identifier")
@@ -747,12 +751,14 @@ class Cycle(BaseModel):
 class CycleCollection(BaseModel):
     """
     Paginated collection of cycle records.
-    
+
     Attributes:
         records: List of Cycle records.
         next_token: Token for fetching next page (None if last page).
     """
-    
+
+    model_config = ConfigDict(frozen=True, str_strip_whitespace=True, populate_by_name=True)
+
     records: List[Cycle] = Field(
         default_factory=list,
         description="List of cycle records"
@@ -799,7 +805,7 @@ class WorkoutZoneDuration(BaseModel):
         Zone 3: 15.0min
     """
     
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, str_strip_whitespace=True, populate_by_name=True)
     
     zone_zero_milli: Optional[int] = None
     zone_one_milli: Optional[int] = None
@@ -875,7 +881,7 @@ class WorkoutScore(BaseModel):
         >>> print(f"Workout strain: {score.strain}")
     """
     
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, str_strip_whitespace=True, populate_by_name=True)
     
     strain: float = Field(
         ..., 
@@ -1073,7 +1079,7 @@ class Workout(BaseModel):
         ...     print(f"Strain: {workout.score.strain}")
     """
     
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, str_strip_whitespace=True, populate_by_name=True)
     
     id: str = Field(..., description="Unique workout ID (UUID)")
     user_id: int = Field(..., description="User's unique identifier")
@@ -1122,12 +1128,14 @@ class Workout(BaseModel):
 class WorkoutCollection(BaseModel):
     """
     Paginated collection of workout records.
-    
+
     Attributes:
         records: List of Workout records.
         next_token: Token for fetching next page (None if last page).
     """
-    
+
+    model_config = ConfigDict(frozen=True, str_strip_whitespace=True, populate_by_name=True)
+
     records: List[Workout] = Field(
         default_factory=list,
         description="List of workout records"

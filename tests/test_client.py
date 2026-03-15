@@ -1222,3 +1222,39 @@ class TestIterators:
 
         assert len(items) == 5
         assert all(isinstance(w, Workout) for w in items)
+
+
+# =============================================================================
+# HTTP Connection Pooling Tests
+# =============================================================================
+
+class TestHTTPConnectionPooling:
+    """Tests for HTTP connection pooling and session management."""
+
+    def test_client_reuses_session(self, client):
+        """The same httpx.Client instance is used across multiple requests."""
+        session_before = client._http_client
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.raise_for_status = Mock()
+        mock_response.json.return_value = {
+            "user_id": 1, "email": "a@b.com", "first_name": "A", "last_name": "B"
+        }
+        with patch.object(client._http_client, "request", return_value=mock_response):
+            client.get_profile_basic()
+            client.get_profile_basic()
+        assert client._http_client is session_before
+
+    def test_client_session_has_timeout_config(self, client):
+        """Session should have the configured read timeout of 30s."""
+        assert client._http_client.timeout.read == 30.0
+        assert client._http_client.timeout.connect == 5.0
+
+    def test_client_closes_session_on_exit(self, mock_auth):
+        """Session should be closed after context manager exit."""
+        with patch("whoopyy.client.OAuthHandler", return_value=mock_auth):
+            with WhoopClient(
+                client_id="test_id", client_secret="test_secret"
+            ) as c:
+                session = c._http_client
+            assert session.is_closed

@@ -653,3 +653,52 @@ class TestExportSleepCsvAttributeAccess:
             assert count == 1
         finally:
             filepath.unlink(missing_ok=True)
+
+
+# =============================================================================
+# Streaming and Row Count Tests
+# =============================================================================
+
+class TestExportStreamingAndRowCount:
+    """Tests for streaming iterable support and row count return values."""
+
+    def test_export_cycle_csv_returns_row_count(self, sample_cycles, tmp_path):
+        """export_cycle_csv should return the number of scored rows written."""
+        filepath = tmp_path / "cycles.csv"
+        count = export_cycle_csv(sample_cycles, filepath)
+        scored = [c for c in sample_cycles if c.score_state == "SCORED" and c.score]
+        assert count == len(scored)
+
+    def test_export_cycle_csv_streaming_with_generator(self, sample_cycles, tmp_path):
+        """export_cycle_csv should accept a generator (iterable), not just a list."""
+        filepath = tmp_path / "cycles_gen.csv"
+
+        def cycle_gen():
+            yield from sample_cycles
+
+        count = export_cycle_csv(cycle_gen(), filepath)
+        assert count > 0
+        assert filepath.exists()
+
+    def test_export_sleep_csv_returns_row_count(self, sample_sleeps, tmp_path):
+        """export_sleep_csv should return the number of rows written."""
+        filepath = tmp_path / "sleeps.csv"
+        count = export_sleep_csv(sample_sleeps, filepath)
+        assert count > 0
+        assert filepath.exists()
+
+    def test_export_workout_csv_returns_row_count(self, sample_workouts, tmp_path):
+        """export_workout_csv should return the number of rows written."""
+        filepath = tmp_path / "workouts.csv"
+        count = export_workout_csv(sample_workouts, filepath)
+        assert count > 0
+        assert filepath.exists()
+
+    def test_export_recovery_csv_creates_file(self, sample_recoveries, tmp_path):
+        """export_recovery_csv should create a valid CSV file."""
+        filepath = tmp_path / "recoveries.csv"
+        count = export_recovery_csv(sample_recoveries, filepath)
+        assert count > 0
+        assert filepath.exists()
+        content = filepath.read_text()
+        assert "Recovery Score" in content or "recovery" in content.lower()

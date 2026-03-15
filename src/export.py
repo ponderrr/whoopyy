@@ -35,7 +35,7 @@ import csv
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, TextIO, Union
+from typing import Any, Dict, List, Optional, Sequence, TextIO, Union
 
 from .constants import (
     RECOVERY_GREEN_THRESHOLD,
@@ -161,7 +161,7 @@ class TrainingLoadTrends:
 # =============================================================================
 
 def export_recovery_csv(
-    recoveries: List[Recovery],
+    recoveries: Sequence[Recovery],
     filepath: Union[str, Path],
     include_unscored: bool = False,
 ) -> int:
@@ -253,7 +253,7 @@ def export_recovery_csv(
 
 
 def export_sleep_csv(
-    sleeps: List[Sleep],
+    sleeps: Sequence[Sleep],
     filepath: Union[str, Path],
     include_unscored: bool = False,
     include_naps: bool = True,
@@ -367,7 +367,7 @@ def export_sleep_csv(
 
 
 def export_cycle_csv(
-    cycles: List[Cycle],
+    cycles: Sequence[Cycle],
     filepath: Union[str, Path],
     include_unscored: bool = False,
 ) -> int:
@@ -444,7 +444,7 @@ def export_cycle_csv(
 
 
 def export_workout_csv(
-    workouts: List[Workout],
+    workouts: Sequence[Workout],
     filepath: Union[str, Path],
     include_unscored: bool = False,
 ) -> int:

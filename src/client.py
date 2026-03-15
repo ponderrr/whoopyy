@@ -39,7 +39,8 @@ Context Manager:
 """
 
 from datetime import date, datetime
-from typing import Any, Dict, Generator, List, Optional, Union
+from types import TracebackType
+from typing import Any, Dict, Generator, List, Optional, Type, Union
 
 import httpx
 
@@ -76,6 +77,8 @@ from .models import (
 from .utils import format_datetime
 
 logger = get_logger(__name__)
+
+__all__ = ["WhoopClient"]
 
 
 class WhoopClient:
@@ -504,7 +507,7 @@ class WhoopClient:
         Args:
             start: Start date/datetime for filtering (inclusive).
             end: End date/datetime for filtering (inclusive).
-            limit: Number of records per page (1-50). Defaults to 25.
+            limit: Number of records per page (1-25). Defaults to 25.
             next_token: Pagination token from previous response.
         
         Returns:
@@ -707,7 +710,7 @@ class WhoopClient:
         Args:
             start: Start date/datetime for filtering.
             end: End date/datetime for filtering.
-            limit: Number of records per page (1-50).
+            limit: Number of records per page (1-25).
             next_token: Pagination token from previous response.
         
         Returns:
@@ -876,7 +879,7 @@ class WhoopClient:
         Args:
             start: Start date/datetime for filtering.
             end: End date/datetime for filtering.
-            limit: Number of records per page (1-50).
+            limit: Number of records per page (1-25).
             next_token: Pagination token from previous response.
         
         Returns:
@@ -1035,7 +1038,7 @@ class WhoopClient:
         Args:
             start: Start date/datetime for filtering.
             end: End date/datetime for filtering.
-            limit: Number of records per page (1-50).
+            limit: Number of records per page (1-25).
             next_token: Pagination token from previous response.
         
         Returns:
@@ -1216,7 +1219,12 @@ class WhoopClient:
         """Context manager entry."""
         return self
     
-    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+    def __exit__(
+        self,
+        exc_type: Optional[Type[BaseException]],
+        exc_val: Optional[BaseException],
+        exc_tb: Optional[TracebackType],
+    ) -> None:
         """Context manager exit - ensures cleanup."""
         self.close()
     

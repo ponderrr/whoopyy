@@ -8,6 +8,29 @@ No magic numbers - all values are named constants with clear documentation.
 import os
 from typing import Final
 
+__all__ = [
+    "API_BASE_URL",
+    "AUTH_BASE_URL",
+    "OAUTH_AUTHORIZE_URL",
+    "OAUTH_TOKEN_URL",
+    "ENDPOINTS",
+    "SCOPES",
+    "DEFAULT_RATE_LIMIT_REQUESTS",
+    "RATE_LIMIT_WINDOW_SECONDS",
+    "MAX_DAILY_REQUESTS",
+    "TOKEN_EXPIRY_SECONDS",
+    "TOKEN_REFRESH_BUFFER_SECONDS",
+    "DEFAULT_TOKEN_FILE",
+    "TOKEN_FILE_PATH",
+    "DEFAULT_TIMEOUT_SECONDS",
+    "MAX_RETRIES",
+    "RETRY_BACKOFF_BASE_SECONDS",
+    "DEFAULT_PAGE_LIMIT",
+    "MAX_PAGE_LIMIT",
+    "RECOVERY_GREEN_THRESHOLD",
+    "RECOVERY_YELLOW_THRESHOLD",
+]
+
 # =============================================================================
 # Base URLs
 # =============================================================================
@@ -89,10 +112,13 @@ Available OAuth scopes for Whoop API access.
 # =============================================================================
 
 DEFAULT_RATE_LIMIT_REQUESTS: Final[int] = 100
-"""Default rate limit: requests per hour."""
+"""Default rate limit: requests per minute."""
 
-RATE_LIMIT_WINDOW_SECONDS: Final[int] = 3600
-"""Rate limit window duration in seconds (1 hour)."""
+RATE_LIMIT_WINDOW_SECONDS: Final[int] = 60
+"""Rate limit window duration in seconds (1 minute)."""
+
+MAX_DAILY_REQUESTS: Final[int] = 10_000
+"""Maximum number of API requests allowed per day."""
 
 # =============================================================================
 # Token Configuration

@@ -24,6 +24,18 @@ Example:
 
 from typing import Optional
 
+__all__ = [
+    "WhoopError",
+    "WhoopAuthError",
+    "WhoopTokenError",
+    "WhoopAPIError",
+    "WhoopNotFoundError",
+    "WhoopValidationError",
+    "WhoopRateLimitError",
+    "WhoopNetworkError",
+    "is_retryable_error",
+]
+
 
 class WhoopError(Exception):
     """

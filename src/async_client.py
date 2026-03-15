@@ -39,7 +39,8 @@ Note:
 """
 
 from datetime import date, datetime
-from typing import Any, AsyncGenerator, Dict, List, Optional, Union
+from types import TracebackType
+from typing import Any, AsyncGenerator, Dict, List, Optional, Type, Union
 
 import httpx
 
@@ -76,6 +77,8 @@ from .models import (
 from .utils import format_datetime
 
 logger = get_logger(__name__)
+
+__all__ = ["AsyncWhoopClient"]
 
 
 class AsyncWhoopClient:
@@ -445,7 +448,7 @@ class AsyncWhoopClient:
         Args:
             start: Start date/datetime for filtering.
             end: End date/datetime for filtering.
-            limit: Number of records per page (1-50).
+            limit: Number of records per page (1-25).
             next_token: Pagination token from previous response.
         
         Returns:
@@ -600,7 +603,7 @@ class AsyncWhoopClient:
         Args:
             start: Start date/datetime for filtering.
             end: End date/datetime for filtering.
-            limit: Number of records per page (1-50).
+            limit: Number of records per page (1-25).
             next_token: Pagination token.
         
         Returns:
@@ -724,7 +727,7 @@ class AsyncWhoopClient:
         Args:
             start: Start date/datetime for filtering.
             end: End date/datetime for filtering.
-            limit: Number of records per page (1-50).
+            limit: Number of records per page (1-25).
             next_token: Pagination token.
         
         Returns:
@@ -848,7 +851,7 @@ class AsyncWhoopClient:
         Args:
             start: Start date/datetime for filtering.
             end: End date/datetime for filtering.
-            limit: Number of records per page (1-50).
+            limit: Number of records per page (1-25).
             next_token: Pagination token.
         
         Returns:
@@ -987,7 +990,12 @@ class AsyncWhoopClient:
         """Async context manager entry."""
         return self
     
-    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
+    async def __aexit__(
+        self,
+        exc_type: Optional[Type[BaseException]],
+        exc_val: Optional[BaseException],
+        exc_tb: Optional[TracebackType],
+    ) -> None:
         """Async context manager exit - ensures cleanup."""
         await self.close()
     

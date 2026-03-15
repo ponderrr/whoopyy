@@ -10,7 +10,7 @@ Usage:
     >>> logger.info("Recovery fetched", extra={"recovery_id": 123, "score": 75.5})
 
 Configuration:
-    Set the WHOOPPY_LOG_LEVEL environment variable to control verbosity:
+    Set the WHOOPYY_LOG_LEVEL environment variable to control verbosity:
     - DEBUG: Detailed debugging information
     - INFO: General operational messages (default)
     - WARNING: Potential issues
@@ -22,6 +22,7 @@ import logging
 import os
 from typing import Optional
 
+__all__ = ["get_logger", "set_log_level", "disable_logging", "enable_logging"]
 
 # Module-level cache for loggers
 _loggers: dict[str, logging.Logger] = {}
@@ -40,7 +41,7 @@ def get_logger(
     Args:
         name: Logger name, typically __name__ from calling module.
         level: Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL).
-               If None, uses WHOOPPY_LOG_LEVEL env var or defaults to INFO.
+               If None, uses WHOOPYY_LOG_LEVEL env var or defaults to INFO.
     
     Returns:
         Configured logging.Logger instance.
@@ -62,7 +63,7 @@ def get_logger(
     
     # Determine log level
     if level is None:
-        env_level = os.environ.get("WHOOPPY_LOG_LEVEL", "INFO").upper()
+        env_level = os.environ.get("WHOOPYY_LOG_LEVEL", "INFO").upper()
         level = getattr(logging, env_level, logging.INFO)
     
     # Create logger

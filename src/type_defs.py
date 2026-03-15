@@ -21,7 +21,20 @@ Example:
     ... }
 """
 
-from typing import TypedDict, Optional, List, Dict, Any
+from typing import TypedDict, Optional, Any
+
+__all__ = [
+    "TokenData",
+    "PaginationParams",
+    "PaginatedResponse",
+    "UserProfileBasicResponse",
+    "BodyMeasurementResponse",
+    "RecoveryScoreResponse",
+    "SleepStageResponse",
+    "SleepScoreResponse",
+    "CycleScoreResponse",
+    "WorkoutScoreResponse",
+]
 
 
 class TokenData(TypedDict):
@@ -57,7 +70,7 @@ class PaginationParams(TypedDict, total=False):
     Attributes:
         start: Start datetime for filtering (ISO 8601 string).
         end: End datetime for filtering (ISO 8601 string).
-        limit: Maximum records to return (1-50).
+        limit: Maximum records to return (1-25).
         nextToken: Pagination token for next page.
     """
     
@@ -76,7 +89,7 @@ class PaginatedResponse(TypedDict):
         next_token: Token for fetching next page (None if last page).
     """
     
-    records: List[Dict[str, Any]]
+    records: list[dict[str, Any]]
     next_token: Optional[str]
 
 
@@ -176,7 +189,7 @@ class SleepScoreResponse(TypedDict, total=False):
     """
     
     stage_summary: SleepStageResponse
-    sleep_needed: Dict[str, Any]
+    sleep_needed: dict[str, Any]
     respiratory_rate: float
     sleep_performance_percentage: float
     sleep_consistency_percentage: float
@@ -224,4 +237,4 @@ class WorkoutScoreResponse(TypedDict, total=False):
     distance_meter: float
     altitude_gain_meter: float
     altitude_change_meter: float
-    zone_duration: Dict[str, int]
+    zone_duration: dict[str, int]

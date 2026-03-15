@@ -28,7 +28,8 @@ import threading
 import time
 import webbrowser
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from typing import List, Optional
+from types import TracebackType
+from typing import List, Optional, Type
 from urllib.parse import parse_qs, urlencode, urlparse
 
 import httpx
@@ -54,6 +55,7 @@ from .utils import (
 
 logger = get_logger(__name__)
 
+__all__ = ["OAuthHandler"]
 
 # =============================================================================
 # OAuth Callback Server
@@ -371,7 +373,7 @@ class OAuthHandler:
             logger.info("Opening browser for authorization")
             webbrowser.open(auth_url)
         else:
-            print(f"\nPlease visit this URL to authorize:\n{auth_url}\n")
+            logger.info("Please visit this URL to authorize: %s", auth_url)
         
         # Start callback server and wait for response
         auth_code = self._wait_for_callback(state)
@@ -862,7 +864,12 @@ class OAuthHandler:
         """Context manager entry."""
         return self
     
-    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+    def __exit__(
+        self,
+        exc_type: Optional[Type[BaseException]],
+        exc_val: Optional[BaseException],
+        exc_tb: Optional[TracebackType],
+    ) -> None:
         """Context manager exit - ensures cleanup."""
         self.close()
     

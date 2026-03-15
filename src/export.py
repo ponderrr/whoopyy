@@ -51,6 +51,20 @@ from .models import (
 
 logger = get_logger(__name__)
 
+__all__ = [
+    "RecoveryTrends",
+    "SleepTrends",
+    "TrainingLoadTrends",
+    "export_recovery_csv",
+    "export_sleep_csv",
+    "export_cycle_csv",
+    "export_workout_csv",
+    "analyze_recovery_trends",
+    "analyze_sleep_trends",
+    "analyze_training_load",
+    "generate_summary_report",
+    "calculate_moving_average",
+]
 
 # =============================================================================
 # Data Classes for Analysis Results

@@ -44,10 +44,33 @@ Example:
 """
 
 from datetime import datetime
-from typing import Optional, Dict, List, ClassVar, Literal
+from typing import Optional, Dict, List, Literal, Iterator
 
 from pydantic import BaseModel, Field, ConfigDict
 
+__all__ = [
+    "UserProfileBasic",
+    "BodyMeasurement",
+    "RecoveryScore",
+    "Recovery",
+    "RecoveryCollection",
+    "SleepStage",
+    "StageSummary",
+    "SleepNeeded",
+    "SleepScore",
+    "Sleep",
+    "SleepCollection",
+    "CycleScore",
+    "Cycle",
+    "CycleCollection",
+    "WorkoutZoneDuration",
+    "WorkoutScore",
+    "SPORT_NAMES",
+    "Workout",
+    "WorkoutCollection",
+    "format_duration",
+    "get_sport_name",
+]
 
 # =============================================================================
 # User Profile Models
@@ -309,8 +332,8 @@ class RecoveryCollection(BaseModel):
     def __len__(self) -> int:
         """Return number of records in collection."""
         return len(self.records)
-    
-    def __iter__(self):
+
+    def __iter__(self) -> Iterator[Recovery]:
         """Iterate over records."""
         return iter(self.records)
 
@@ -585,19 +608,19 @@ class SleepCollection(BaseModel):
     """
     
     records: List[Sleep] = Field(
-        default_factory=list, 
+        default_factory=list,
         description="List of sleep records"
     )
     next_token: Optional[str] = Field(
-        None, 
+        None,
         description="Pagination token for next page"
     )
-    
+
     def __len__(self) -> int:
         """Return number of records in collection."""
         return len(self.records)
-    
-    def __iter__(self):
+
+    def __iter__(self) -> Iterator[Sleep]:
         """Iterate over records."""
         return iter(self.records)
 
@@ -739,19 +762,19 @@ class CycleCollection(BaseModel):
     """
     
     records: List[Cycle] = Field(
-        default_factory=list, 
+        default_factory=list,
         description="List of cycle records"
     )
     next_token: Optional[str] = Field(
-        None, 
+        None,
         description="Pagination token for next page"
     )
-    
+
     def __len__(self) -> int:
         """Return number of records in collection."""
         return len(self.records)
-    
-    def __iter__(self):
+
+    def __iter__(self) -> Iterator[Cycle]:
         """Iterate over records."""
         return iter(self.records)
 
@@ -1117,19 +1140,19 @@ class WorkoutCollection(BaseModel):
     """
     
     records: List[Workout] = Field(
-        default_factory=list, 
+        default_factory=list,
         description="List of workout records"
     )
     next_token: Optional[str] = Field(
-        None, 
+        None,
         description="Pagination token for next page"
     )
-    
+
     def __len__(self) -> int:
         """Return number of records in collection."""
         return len(self.records)
-    
-    def __iter__(self):
+
+    def __iter__(self) -> Iterator[Workout]:
         """Iterate over records."""
         return iter(self.records)
 

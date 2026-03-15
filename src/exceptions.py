@@ -163,7 +163,7 @@ class WhoopValidationError(WhoopAPIError):
     
     Example:
         >>> try:
-        ...     client.get_recovery_collection(limit=999)  # Max is 50
+        ...     client.get_recovery_collection(limit=999)  # Max is 25
         ... except WhoopValidationError as e:
         ...     print(f"Invalid request: {e.message}")
     """

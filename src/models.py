@@ -44,7 +44,7 @@ Example:
 """
 
 from datetime import datetime
-from typing import Optional, Dict, List, Literal, Iterator
+from typing import Optional, Dict, List, Literal
 
 from pydantic import BaseModel, Field, ConfigDict
 
@@ -333,10 +333,6 @@ class RecoveryCollection(BaseModel):
         """Return number of records in collection."""
         return len(self.records)
 
-    def __iter__(self) -> Iterator[Recovery]:
-        """Iterate over records."""
-        return iter(self.records)
-
 
 # =============================================================================
 # Sleep Models
@@ -620,10 +616,6 @@ class SleepCollection(BaseModel):
         """Return number of records in collection."""
         return len(self.records)
 
-    def __iter__(self) -> Iterator[Sleep]:
-        """Iterate over records."""
-        return iter(self.records)
-
 
 # =============================================================================
 # Cycle (Daily Strain) Models
@@ -774,10 +766,6 @@ class CycleCollection(BaseModel):
         """Return number of records in collection."""
         return len(self.records)
 
-    def __iter__(self) -> Iterator[Cycle]:
-        """Iterate over records."""
-        return iter(self.records)
-
 
 # =============================================================================
 # Workout Models
@@ -823,39 +811,40 @@ class WorkoutZoneDuration(BaseModel):
     @property
     def zone_zero_minutes(self) -> float:
         """Zone 0 duration in minutes."""
-        return round(self.zone_zero_milli / 60000, 1)
-    
+        return round((self.zone_zero_milli or 0) / 60000, 1)
+
     @property
     def zone_one_minutes(self) -> float:
         """Zone 1 duration in minutes."""
-        return round(self.zone_one_milli / 60000, 1)
-    
+        return round((self.zone_one_milli or 0) / 60000, 1)
+
     @property
     def zone_two_minutes(self) -> float:
         """Zone 2 duration in minutes."""
-        return round(self.zone_two_milli / 60000, 1)
-    
+        return round((self.zone_two_milli or 0) / 60000, 1)
+
     @property
     def zone_three_minutes(self) -> float:
         """Zone 3 duration in minutes."""
-        return round(self.zone_three_milli / 60000, 1)
-    
+        return round((self.zone_three_milli or 0) / 60000, 1)
+
     @property
     def zone_four_minutes(self) -> float:
         """Zone 4 duration in minutes."""
-        return round(self.zone_four_milli / 60000, 1)
-    
+        return round((self.zone_four_milli or 0) / 60000, 1)
+
     @property
     def zone_five_minutes(self) -> float:
         """Zone 5 duration in minutes."""
-        return round(self.zone_five_milli / 60000, 1)
-    
+        return round((self.zone_five_milli or 0) / 60000, 1)
+
     @property
     def total_minutes(self) -> float:
         """Total time across all zones in minutes."""
         total_ms = (
-            self.zone_zero_milli + self.zone_one_milli + self.zone_two_milli +
-            self.zone_three_milli + self.zone_four_milli + self.zone_five_milli
+            (self.zone_zero_milli or 0) + (self.zone_one_milli or 0) +
+            (self.zone_two_milli or 0) + (self.zone_three_milli or 0) +
+            (self.zone_four_milli or 0) + (self.zone_five_milli or 0)
         )
         return round(total_ms / 60000, 1)
 
@@ -1151,10 +1140,6 @@ class WorkoutCollection(BaseModel):
     def __len__(self) -> int:
         """Return number of records in collection."""
         return len(self.records)
-
-    def __iter__(self) -> Iterator[Workout]:
-        """Iterate over records."""
-        return iter(self.records)
 
 
 # =============================================================================

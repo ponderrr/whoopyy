@@ -5,6 +5,41 @@ All notable changes to WhoopYY will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-03-14
+
+### Breaking Changes
+- `get_sleep(sleep_id)` now accepts `str` (UUID) instead of `int`
+- `get_workout(workout_id)` now accepts `str` (UUID) instead of `int`
+- `Workout.sport_name` is no longer required; use `sport_id` (int) instead
+- Collection models no longer override `__iter__`; iterate via `.records`
+
+### Fixed
+- All API endpoint paths corrected from v2 to v1 (data calls now work)
+- `MAX_PAGE_LIMIT` corrected from 50 to 25
+- `export_cycle_csv()` and `export_sleep_csv()` no longer crash with AttributeError
+- Token file permissions set to 600, path is now absolute (~/.whoop_tokens.json)
+- Concurrent token refresh race condition resolved with threading/asyncio locks
+- 401 responses now trigger automatic token refresh and retry
+- `revoke_access()` now POSTs to correct OAuth revocation endpoint
+- RecoveryScore.resting_heart_rate accepts float (was truncating to int)
+- RecoveryScore.hrv_rmssd_milli allows zero values
+- score_state fields now validate against Literal enum
+- Token refresh retries on transient 5xx errors with exponential backoff
+- OAuth callback server times out after 120 seconds instead of hanging forever
+- All mypy type errors resolved (WorkoutZoneDuration Optional handling, Collection __iter__ override)
+
+### Added
+- `WhoopNotFoundError` exception for 404 responses
+- `WhoopNetworkError` now properly raised on network failures
+- `async_get_valid_token()` for non-blocking async token management
+- pyproject.toml with tool configurations
+- CI workflow (.github/workflows/ci.yml)
+- Comprehensive test suite (360+ tests, 90%+ coverage)
+- Integration test stubs (tests/integration/test_real_api.py)
+
+### Removed
+- Phantom dependencies: python-dotenv, keyring
+
 ## [0.1.0] - 2026-01-25
 
 ### Added
@@ -29,7 +64,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `UserProfileBasic` and `BodyMeasurement` for user data
   - `Recovery` and `RecoveryScore` with recovery zone helpers
   - `Sleep`, `SleepScore`, and `SleepStage` with duration calculations
-  - `Cycle` and `CycleStrain` with strain level helpers
+  - `Cycle` and `CycleScore` with strain level helpers
   - `Workout` and `WorkoutScore` with sport name mapping
 
 - **Export Utilities**
@@ -50,7 +85,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Technical Details
 
 - Python 3.9+ support
-- Dependencies: httpx, pydantic, python-dotenv, keyring
+- Dependencies: httpx, pydantic
 - Proprietary License
 
+[0.2.0]: https://github.com/ponderrr/whoopyy/releases/tag/v0.2.0
 [0.1.0]: https://github.com/ponderrr/whoopyy/releases/tag/v0.1.0

@@ -473,7 +473,7 @@ class TestRecoveryMethods:
     def test_get_recovery_collection_invalid_limit(self, client) -> None:
         """Test get_recovery_collection with invalid limit."""
         with pytest.raises(WhoopValidationError):
-            client.get_recovery_collection(limit=100)  # Max is 50
+            client.get_recovery_collection(limit=100)  # Max is 25
     
     def test_get_recovery_collection_with_dates(self, client) -> None:
         """Test get_recovery_collection with date filtering."""

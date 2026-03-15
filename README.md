@@ -15,7 +15,7 @@
 </p>
 
 <p align="center">
-  <em>Type-safe • Async-ready • Production-tested • 150+ tests • Zero type errors</em>
+  <em>Type-safe • Async-ready • Production-tested • 360+ tests • Zero type errors</em>
 </p>
 
 ---
@@ -57,7 +57,7 @@ cd whoopyy
 pip install -e .
 ```
 
-**Requirements:** Python 3.9+, httpx, pydantic
+**Dependencies:** Python 3.9+, [httpx](https://www.python-httpx.org/) (>=0.27.0), [pydantic](https://docs.pydantic.dev/) (>=2.5.0)
 
 ## Quick Start
 
@@ -107,7 +107,7 @@ for s in sleep.records:
 workouts = client.get_workout_collection(limit=5)
 for w in workouts.records:
     if w.score:
-        print(f"{w.sport_name}: {w.duration_minutes:.0f}min | Strain: {w.score.strain:.1f}")
+        print(f"{w.sport_display_name}: {w.duration_minutes:.0f}min | Strain: {w.score.strain:.1f}")
 ```
 
 ## Features
@@ -117,7 +117,7 @@ for w in workouts.records:
 | Endpoint | Methods |
 |----------|---------|
 | **User Profile** | `get_profile_basic()`, `get_body_measurement()` |
-| **Recovery** | `get_recovery()`, `get_recovery_collection()`, `get_all_recovery()`, `iter_recovery()` |
+| **Recovery** | `get_recovery_for_cycle()`, `get_recovery_collection()`, `get_all_recovery()`, `iter_recovery()` |
 | **Sleep** | `get_sleep()`, `get_sleep_collection()`, `get_all_sleep()`, `iter_sleep()` |
 | **Cycles** | `get_cycle()`, `get_cycle_collection()`, `get_all_cycles()`, `iter_cycles()` |
 | **Workouts** | `get_workout()`, `get_workout_collection()`, `get_all_workouts()`, `iter_workouts()` |
@@ -128,12 +128,12 @@ for w in workouts.records:
 Every API response is validated and typed:
 
 ```python
-recovery = client.get_recovery(cycle_id=12345)
+recovery = client.get_recovery_for_cycle(cycle_id=12345)
 
 # Full IDE autocomplete and type checking
 recovery.score.recovery_score      # float (0-100)
 recovery.score.hrv_rmssd_milli     # float
-recovery.score.resting_heart_rate  # int
+recovery.score.resting_heart_rate  # float
 recovery.score.recovery_zone       # str: "green" | "yellow" | "red"
 recovery.score.spo2_percentage     # Optional[float]
 ```
@@ -211,7 +211,7 @@ client = WhoopClient(
     client_secret: str,                      # Required - Whoop API client secret
     redirect_uri: str = "http://localhost:8080/callback",  # OAuth callback
     scope: Optional[List[str]] = None,       # OAuth scopes (default: all)
-    token_file: str = ".whoop_tokens.json",  # Token cache location
+    token_file: str = "~/.whoop_tokens.json", # Token cache location (absolute path)
     timeout: float = 30.0,                   # Request timeout (seconds)
 )
 ```
@@ -220,13 +220,13 @@ client = WhoopClient(
 
 ```python
 # Single recovery by cycle ID
-recovery = client.get_recovery(cycle_id: int) -> Recovery
+recovery = client.get_recovery_for_cycle(cycle_id: int) -> Recovery
 
 # Paginated collection
 collection = client.get_recovery_collection(
     start: Optional[datetime] = None,   # Filter start date
     end: Optional[datetime] = None,     # Filter end date
-    limit: int = 25,                    # Records per page (max 50)
+    limit: int = 25,                    # Records per page (max 25)
     next_token: Optional[str] = None,   # Pagination token
 ) -> RecoveryCollection
 
@@ -245,7 +245,7 @@ for recovery in client.iter_recovery(start=None, end=None):
 ### Sleep Methods
 
 ```python
-sleep = client.get_sleep(sleep_id: int) -> Sleep
+sleep = client.get_sleep(sleep_id: str) -> Sleep
 
 collection = client.get_sleep_collection(
     start: Optional[datetime] = None,
@@ -281,7 +281,7 @@ for cycle in client.iter_cycles(...):
 ### Workout Methods
 
 ```python
-workout = client.get_workout(workout_id: int) -> Workout
+workout = client.get_workout(workout_id: str) -> Workout
 
 collection = client.get_workout_collection(
     start: Optional[datetime] = None,
@@ -305,8 +305,9 @@ WhoopError (base)
 ├── WhoopAuthError        # Authentication failures
 │   └── WhoopTokenError   # Token-specific issues
 ├── WhoopAPIError         # API request failures
-│   ├── WhoopValidationError   # Invalid parameters (400)
-│   └── WhoopRateLimitError    # Rate limited (429)
+│   ├── WhoopNotFoundError     # Resource not found (404)
+│   └── WhoopValidationError   # Invalid parameters (400)
+├── WhoopRateLimitError   # Rate limited (429)
 └── WhoopNetworkError     # Connection issues
 ```
 
@@ -348,21 +349,21 @@ except WhoopAPIError as e:
 ```python
 class Recovery:
     cycle_id: int
-    sleep_id: int
+    sleep_id: str                  # UUID string
     user_id: int
     created_at: datetime
     updated_at: datetime
-    score_state: str  # "SCORED" | "PENDING" | "UNSCORABLE"
+    score_state: str  # "SCORED" | "PENDING_SCORE" | "UNSCORABLE"
     score: Optional[RecoveryScore]
 
 class RecoveryScore:
     user_calibrating: bool
     recovery_score: float          # 0-100
-    resting_heart_rate: int        # bpm
+    resting_heart_rate: float      # bpm
     hrv_rmssd_milli: float         # milliseconds
     spo2_percentage: Optional[float]
     skin_temp_celsius: Optional[float]
-    
+
     @property
     def recovery_zone(self) -> str:  # "green" | "yellow" | "red"
 ```
@@ -371,23 +372,28 @@ class RecoveryScore:
 
 ```python
 class Sleep:
-    id: int
+    id: str                        # UUID string
+    cycle_id: int
     user_id: int
     start: datetime
-    end: Optional[datetime]
+    end: datetime
     nap: bool
-    score_state: str
+    score_state: str  # "SCORED" | "PENDING_SCORE" | "UNSCORABLE"
     score: Optional[SleepScore]
-    
+
     @property
-    def duration_hours(self) -> Optional[float]
+    def duration_hours(self) -> float
 
 class SleepScore:
-    total_sleep_duration_hours: float
-    sleep_performance_percentage: float
-    sleep_efficiency_percentage: float
-    respiratory_rate: float
-    stage_summary: Dict[str, int]  # Sleep stages in milliseconds
+    stage_summary: Optional[StageSummary]
+    sleep_needed: Optional[SleepNeeded]
+    respiratory_rate: Optional[float]
+    sleep_performance_percentage: Optional[float]
+    sleep_efficiency_percentage: Optional[float]
+    sleep_consistency_percentage: Optional[float]
+
+    @property
+    def total_sleep_duration_hours(self) -> float
 ```
 
 ### Cycle (Daily Strain)
@@ -398,36 +404,36 @@ class Cycle:
     user_id: int
     start: datetime
     end: Optional[datetime]
-    score_state: str
-    score: Optional[CycleStrain]
+    score_state: str  # "SCORED" | "PENDING_SCORE" | "UNSCORABLE"
+    score: Optional[CycleScore]
 
-class CycleStrain:
-    score: float              # 0-21 strain scale
+class CycleScore:
+    strain: float              # 0-21 strain scale
     average_heart_rate: int
     max_heart_rate: int
     kilojoule: float
-    zone_duration: Dict[str, int]  # HR zones in milliseconds
-    
+
     @property
-    def strain_level(self) -> str:  # "light" | "moderate" | "high" | "overreaching"
+    def strain_level(self) -> str:  # "Light" | "Moderate" | "Strenuous" | "All Out"
 ```
 
 ### Workout
 
 ```python
 class Workout:
-    id: int
+    id: str                        # UUID string
     user_id: int
-    sport_id: int
+    sport_id: int                  # Primary identifier for sport type
+    sport_name: Optional[str]      # Not returned by WHOOP API; use sport_id instead
     start: datetime
-    end: Optional[datetime]
-    score_state: str
+    end: datetime
+    score_state: str  # "SCORED" | "PENDING_SCORE" | "UNSCORABLE"
     score: Optional[WorkoutScore]
-    
+
     @property
-    def sport_name(self) -> str     # Human-readable sport name
+    def sport_display_name(self) -> str  # Human-readable sport name from sport_id
     @property
-    def duration_minutes(self) -> Optional[float]
+    def duration_minutes(self) -> float
 
 class WorkoutScore:
     strain: float                   # 0-21
@@ -452,10 +458,7 @@ WHOOP_CLIENT_SECRET=your_client_secret
 
 ```python
 import os
-from dotenv import load_dotenv
 from whoopyy import WhoopClient
-
-load_dotenv()
 
 client = WhoopClient(
     client_id=os.environ["WHOOP_CLIENT_ID"],
@@ -551,9 +554,9 @@ mypy whoopyy/
 ```
 
 **Test Statistics:**
-- 150 tests across 5 modules
-- 95%+ code coverage
-- MyPy strict mode: 0 errors
+- 360+ tests across 10+ modules
+- 90%+ code coverage
+- MyPy: 0 errors
 
 ## Examples
 

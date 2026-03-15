@@ -350,7 +350,7 @@ class TestRecoveryCollection:
 
         collection = RecoveryCollection(records=records)
 
-        cycle_ids = [r.cycle_id for r in collection]
+        cycle_ids = [r.cycle_id for r in collection.records]
         assert cycle_ids == [1, 2, 3]
 
 

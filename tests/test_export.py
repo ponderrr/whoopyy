@@ -239,7 +239,7 @@ class TestAnalyzeRecoveryTrends:
             user_id=12345,
             created_at=datetime.now(timezone.utc),
             updated_at=datetime.now(timezone.utc),
-            score_state="PENDING",
+            score_state="PENDING_SCORE",
             score=None,
         )
         with pytest.raises(ValueError, match="No scored recovery records"):

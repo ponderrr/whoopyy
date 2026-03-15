@@ -55,6 +55,8 @@ from .constants import (
 from .exceptions import (
     WhoopAPIError,
     WhoopAuthError,
+    WhoopNetworkError,
+    WhoopNotFoundError,
     WhoopRateLimitError,
     WhoopValidationError,
 )
@@ -255,6 +257,7 @@ class WhoopClient:
         endpoint: str,
         params: Optional[Dict[str, Any]] = None,
         data: Optional[Dict[str, Any]] = None,
+        _retry: bool = False,
     ) -> Dict[str, Any]:
         """
         Make authenticated API request.
@@ -315,12 +318,28 @@ class WhoopClient:
             
             # Handle authentication errors
             if response.status_code == 401:
-                logger.error("Authentication failed - token may be invalid")
-                raise WhoopAuthError(
-                    "Authentication failed. Please re-authenticate.",
-                    status_code=401,
+                if _retry:
+                    raise WhoopAuthError(
+                        f"Authentication failed after token refresh. "
+                        f"Status: 401. Response: {response.text}",
+                        status_code=401,
+                    )
+                # Force refresh and retry once
+                logger.warning("Authentication failed - refreshing token and retrying")
+                self.auth.refresh_access_token()
+                return self._request(method, endpoint, params=params, data=data, _retry=True)
+
+            # Handle not found errors
+            if response.status_code == 404:
+                logger.error(
+                    "Resource not found",
+                    extra={"url": endpoint, "error": response.text}
                 )
-            
+                raise WhoopNotFoundError(
+                    f"Resource not found: {endpoint}. Response: {response.text}",
+                    status_code=404,
+                )
+
             # Handle validation errors
             if response.status_code == 400:
                 error_detail = response.text
@@ -354,7 +373,7 @@ class WhoopClient:
                 f"API request failed: {e.response.text}",
                 status_code=e.response.status_code,
             )
-        except (WhoopRateLimitError, WhoopAuthError, WhoopValidationError):
+        except (WhoopRateLimitError, WhoopAuthError, WhoopNotFoundError, WhoopValidationError):
             # Re-raise our custom exceptions
             raise
         except httpx.RequestError as e:
@@ -362,7 +381,7 @@ class WhoopClient:
                 "Request error",
                 extra={"error": str(e)}
             )
-            raise WhoopAPIError(f"Request failed: {e}")
+            raise WhoopNetworkError(str(e)) from e
     
     def _format_date_param(
         self,

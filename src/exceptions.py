@@ -133,6 +133,11 @@ class WhoopAPIError(WhoopError):
     pass
 
 
+class WhoopNotFoundError(WhoopAPIError):
+    """Raised when the WHOOP API returns HTTP 404 Not Found."""
+    pass
+
+
 class WhoopValidationError(WhoopAPIError):
     """
     Data validation error.

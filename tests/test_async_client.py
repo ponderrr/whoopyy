@@ -26,8 +26,11 @@ from whoopyy.models import (
 from whoopyy.exceptions import (
     WhoopAPIError,
     WhoopAuthError,
+    WhoopNetworkError,
+    WhoopNotFoundError,
     WhoopRateLimitError,
     WhoopValidationError,
+    is_retryable_error,
 )
 
 
@@ -191,17 +194,21 @@ class TestAsyncRequest:
         assert exc.value.status_code == 429
     
     @pytest.mark.asyncio
-    async def test_request_auth_error_handling(self, async_client) -> None:
-        """Test authentication error (401) handling."""
-        mock_response = Mock()
-        mock_response.status_code = 401
-        
-        async_client._http_client.request = AsyncMock(return_value=mock_response)
-        
+    async def test_request_auth_error_handling(self, async_client, mock_auth) -> None:
+        """Test authentication error (401) triggers refresh and retry; second 401 raises WhoopAuthError."""
+        mock_response_401 = Mock()
+        mock_response_401.status_code = 401
+        mock_response_401.text = "Unauthorized"
+
+        mock_auth.refresh_access_token = Mock()
+
+        async_client._http_client.request = AsyncMock(return_value=mock_response_401)
+
         with pytest.raises(WhoopAuthError) as exc:
             await async_client._request("GET", "/test")
-        
+
         assert exc.value.status_code == 401
+        mock_auth.refresh_access_token.assert_called_once()
     
     @pytest.mark.asyncio
     async def test_request_validation_error_handling(self, async_client) -> None:
@@ -223,12 +230,78 @@ class TestAsyncRequest:
         mock_response = Mock()
         mock_response.status_code = 204
         mock_response.raise_for_status = Mock()
-        
+
         async_client._http_client.request = AsyncMock(return_value=mock_response)
-        
+
         result = await async_client._request("DELETE", "/test")
-        
+
         assert result == {}
+
+    @pytest.mark.asyncio
+    async def test_network_error_raises_whoop_network_error(self, async_client) -> None:
+        """Test that httpx.RequestError raises WhoopNetworkError."""
+        async_client._http_client.request = AsyncMock(
+            side_effect=httpx.ConnectError("Connection refused")
+        )
+
+        with pytest.raises(WhoopNetworkError):
+            await async_client._request("GET", "/test")
+
+    @pytest.mark.asyncio
+    async def test_404_raises_whoop_not_found_error(self, async_client) -> None:
+        """Test that a 404 response raises WhoopNotFoundError."""
+        mock_response = Mock()
+        mock_response.status_code = 404
+        mock_response.text = "Not Found"
+
+        async_client._http_client.request = AsyncMock(return_value=mock_response)
+
+        with pytest.raises(WhoopNotFoundError) as exc:
+            await async_client._request("GET", "/test/resource")
+
+        assert exc.value.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_401_triggers_refresh_and_retry(self, async_client, mock_auth) -> None:
+        """Test that a 401 triggers token refresh and a successful retry."""
+        mock_401 = Mock()
+        mock_401.status_code = 401
+        mock_401.text = "Unauthorized"
+
+        mock_200 = Mock()
+        mock_200.status_code = 200
+        mock_200.json.return_value = {"ok": True}
+        mock_200.raise_for_status = Mock()
+
+        mock_auth.refresh_access_token = Mock()
+
+        async_client._http_client.request = AsyncMock(side_effect=[mock_401, mock_200])
+
+        result = await async_client._request("GET", "/test")
+
+        assert result == {"ok": True}
+        mock_auth.refresh_access_token.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_401_double_triggers_raises_auth_error(self, async_client, mock_auth) -> None:
+        """Test that two consecutive 401s raises WhoopAuthError after one refresh."""
+        mock_401 = Mock()
+        mock_401.status_code = 401
+        mock_401.text = "Unauthorized"
+
+        mock_auth.refresh_access_token = Mock()
+
+        async_client._http_client.request = AsyncMock(return_value=mock_401)
+
+        with pytest.raises(WhoopAuthError):
+            await async_client._request("GET", "/test")
+
+        mock_auth.refresh_access_token.assert_called_once()
+
+    def test_is_retryable_error_true_for_network_error(self, async_client) -> None:
+        """Test that is_retryable_error returns True for WhoopNetworkError."""
+        error = WhoopNetworkError("timeout")
+        assert is_retryable_error(error) is True
 
 
 # =============================================================================

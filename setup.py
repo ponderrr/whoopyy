@@ -8,8 +8,8 @@ with open("README.md", "r", encoding="utf-8") as fh:
 setup(
     name="whoopyy",
     version="0.3.1",
-    author="Robert Ponder",
-    author_email="robert.ponder@selu.edu",
+    author="Andrew Ponder",
+    author_email="raponder.business@gmail.com",
     description="Complete Python SDK for Whoop API",
     long_description=long_description,
     long_description_content_type="text/markdown",
@@ -17,9 +17,8 @@ setup(
     package_dir={"whoopyy": "src"},
     packages=["whoopyy"],
     classifiers=[
-        "Development Status :: 3 - Alpha",
+        "Development Status :: 4 - Beta",
         "Intended Audience :: Developers",
-        "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
         "Programming Language :: Python :: 3",
         "Programming Language :: Python :: 3.9",
         "Programming Language :: Python :: 3.10",
@@ -31,11 +30,4 @@ setup(
     ],
     python_requires=">=3.9",
     keywords=["whoop", "fitness", "health", "api", "sdk", "oauth", "wearable"],
-    install_requires=[
-        "httpx>=0.27.0",
-        "pydantic>=2.5.0",
-    ],
-    extras_require={
-        "dev": ["pytest", "pytest-asyncio", "pytest-cov", "mypy", "httpx"],
-    },
 )

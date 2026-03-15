@@ -1,5 +1,9 @@
 name: CI
-on: [push, pull_request]
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -11,3 +15,30 @@ jobs:
       - run: pip install -e ".[dev]"
       - run: pytest --tb=short -q
       - run: mypy src/ --ignore-missing-imports
+      - name: Check version consistency
+        run: |
+          python -c "
+          import re
+
+          with open('src/__init__.py') as f:
+              content = f.read()
+          init_version = re.search(r'__version__\s*=\s*[\"'"'"'](.*?)[\"'"'"']', content).group(1)
+
+          with open('pyproject.toml') as f:
+              content = f.read()
+          toml_version = re.search(r'version\s*=\s*[\"'"'"'](.*?)[\"'"'"']', content).group(1)
+
+          with open('setup.py') as f:
+              content = f.read()
+          setup_version = re.search(r'version\s*=\s*[\"'"'"'](.*?)[\"'"'"']', content).group(1)
+
+          print(f'__init__.py:    {init_version}')
+          print(f'pyproject.toml: {toml_version}')
+          print(f'setup.py:       {setup_version}')
+
+          assert init_version == toml_version == setup_version, (
+              f'Version mismatch: __init__.py={init_version}, '
+              f'pyproject.toml={toml_version}, setup.py={setup_version}'
+          )
+          print('Version consistency: OK')
+          "

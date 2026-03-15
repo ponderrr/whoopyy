@@ -39,6 +39,7 @@ Note:
 """
 
 import asyncio
+import logging
 
 from datetime import date, datetime
 from types import TracebackType
@@ -78,7 +79,7 @@ from .models import (
     Workout,
     WorkoutCollection,
 )
-from .utils import format_datetime
+from .utils import _sanitize_error_response, format_datetime
 
 logger = get_logger(__name__)
 
@@ -185,7 +186,8 @@ class AsyncWhoopClient:
         )
         
         self._authenticated = False
-        
+        self._cache: Dict[str, tuple[Any, float]] = {}  # {key: (value, expiry)}
+
         logger.info(
             "AsyncWhoopClient initialized",
             extra={"client_id": client_id[:8] + "..."}
@@ -277,13 +279,14 @@ class AsyncWhoopClient:
         try:
             headers = await self._get_auth_headers()
 
-            logger.debug(
-                "Making async API request",
-                extra={
-                    "method": method,
-                    "endpoint": endpoint,
-                }
-            )
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(
+                    "Making async API request",
+                    extra={
+                        "method": method,
+                        "endpoint": endpoint,
+                    }
+                )
             
             start = time.perf_counter()
             response = await self._http_client.request(
@@ -299,6 +302,16 @@ class AsyncWhoopClient:
                 method.upper(), endpoint, response.status_code, elapsed * 1000,
             )
 
+            # Track rate limit headers
+            remaining = response.headers.get("X-RateLimit-Remaining")
+            if remaining is not None:
+                try:
+                    remaining_int = int(str(remaining))
+                    if remaining_int <= 5:
+                        logger.warning("API rate limit low: %d requests remaining", remaining_int)
+                except (ValueError, TypeError):
+                    pass
+
             # Handle rate limiting
             if response.status_code == 429:
                 retry_after_header = response.headers.get("Retry-After", "60")
@@ -306,11 +319,13 @@ class AsyncWhoopClient:
                     retry_after = int(retry_after_header)
                 except ValueError:
                     retry_after = 60
-                
-                logger.warning(
-                    "Rate limit exceeded",
-                    extra={"retry_after": retry_after}
-                )
+
+                if not _retry:
+                    logger.warning("Rate limited, retrying after %ds", retry_after)
+                    await asyncio.sleep(min(retry_after, 120))
+                    return await self._request(method, endpoint, params=params, data=data, _retry=True)
+
+                logger.warning("Rate limit exceeded after retry")
                 raise WhoopRateLimitError(
                     "Rate limit exceeded. Please wait before retrying.",
                     retry_after=retry_after,
@@ -322,7 +337,7 @@ class AsyncWhoopClient:
                 if _retry:
                     raise WhoopAuthError(
                         f"Authentication failed after token refresh. "
-                        f"Status: 401. Response: {response.text}",
+                        f"Status: 401. Response: {_sanitize_error_response(response.text)}",
                         status_code=401,
                     )
                 # Force refresh and retry once
@@ -334,17 +349,17 @@ class AsyncWhoopClient:
             if response.status_code == 404:
                 logger.error(
                     "Resource not found",
-                    extra={"url": endpoint, "error": response.text}
+                    extra={"url": endpoint, "error": _sanitize_error_response(response.text)}
                 )
                 raise WhoopNotFoundError(
-                    f"Resource not found: {endpoint}. Response: {response.text}",
+                    f"Resource not found: {endpoint}. Response: {_sanitize_error_response(response.text)}",
                     status_code=404,
                 )
 
             # Handle validation errors
             if response.status_code == 400:
                 raise WhoopValidationError(
-                    f"Invalid request: {response.text}",
+                    f"Invalid request: {_sanitize_error_response(response.text)}",
                     status_code=400,
                 )
             
@@ -363,15 +378,13 @@ class AsyncWhoopClient:
                 "Async API request failed",
                 extra={
                     "status_code": e.response.status_code,
-                    "error": e.response.text,
+                    "error": _sanitize_error_response(e.response.text),
                 }
             )
             raise WhoopAPIError(
-                f"API request failed: {e.response.text}",
+                f"API request failed: {_sanitize_error_response(e.response.text)}",
                 status_code=e.response.status_code,
             )
-        except (WhoopRateLimitError, WhoopAuthError, WhoopNotFoundError, WhoopValidationError):
-            raise
         except httpx.RequestError as e:
             logger.error(
                 "Async request error",
@@ -379,6 +392,19 @@ class AsyncWhoopClient:
             )
             raise WhoopNetworkError(str(e)) from e
     
+    def _cache_get(self, key: str) -> Any:
+        """Get value from cache if not expired."""
+        if key in self._cache:
+            value, expiry = self._cache[key]
+            if time.time() < expiry:
+                return value
+            del self._cache[key]
+        return None
+
+    def _cache_set(self, key: str, value: Any, ttl: int) -> None:
+        """Set value in cache with TTL in seconds."""
+        self._cache[key] = (value, time.time() + ttl)
+
     def _format_date_param(
         self,
         value: Optional[Union[datetime, date, str]]
@@ -393,7 +419,24 @@ class AsyncWhoopClient:
             return format_datetime(datetime.combine(value, datetime.min.time()))
         else:
             return value
-    
+
+    def _build_collection_params(
+        self,
+        limit: int,
+        start: Optional[Union[datetime, date, str]] = None,
+        end: Optional[Union[datetime, date, str]] = None,
+        next_token: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Build query parameters for paginated collection endpoints."""
+        params: Dict[str, Any] = {"limit": limit}
+        if start:
+            params["start"] = self._format_date_param(start)
+        if end:
+            params["end"] = self._format_date_param(end)
+        if next_token:
+            params["nextToken"] = next_token
+        return params
+
     # =========================================================================
     # User Profile Methods
     # =========================================================================
@@ -409,22 +452,32 @@ class AsyncWhoopClient:
             >>> profile = await client.get_profile_basic()
             >>> print(f"Hello, {profile.first_name}!")
         """
+        cached = self._cache_get("profile_basic")
+        if isinstance(cached, UserProfileBasic):
+            return cached
         logger.info("Fetching basic profile")
-        
+
         data = await self._request("GET", ENDPOINTS["user_profile_basic"])
-        return UserProfileBasic(**data)
-    
+        profile = UserProfileBasic(**data)
+        self._cache_set("profile_basic", profile, 3600)  # Cache 1 hour
+        return profile
+
     async def get_body_measurement(self) -> BodyMeasurement:
         """
         Get user body measurements.
-        
+
         Returns:
             BodyMeasurement with height, weight, and max heart rate.
         """
+        cached = self._cache_get("body_measurement")
+        if isinstance(cached, BodyMeasurement):
+            return cached
         logger.info("Fetching body measurements")
-        
+
         data = await self._request("GET", ENDPOINTS["user_body_measurement"])
-        return BodyMeasurement(**data)
+        measurement = BodyMeasurement(**data)
+        self._cache_set("body_measurement", measurement, 86400)  # Cache 24 hours
+        return measurement
     
     # =========================================================================
     # Recovery Methods
@@ -486,16 +539,9 @@ class AsyncWhoopClient:
             "Fetching recovery collection",
             extra={"limit": limit}
         )
-        
-        params: Dict[str, Any] = {"limit": limit}
-        
-        if start:
-            params["start"] = self._format_date_param(start)
-        if end:
-            params["end"] = self._format_date_param(end)
-        if next_token:
-            params["nextToken"] = next_token
-        
+
+        params = self._build_collection_params(limit, start, end, next_token)
+
         data = await self._request("GET", ENDPOINTS["recovery_collection"], params=params)
         return RecoveryCollection(**data)
     
@@ -636,16 +682,9 @@ class AsyncWhoopClient:
             "Fetching sleep collection",
             extra={"limit": limit}
         )
-        
-        params: Dict[str, Any] = {"limit": limit}
-        
-        if start:
-            params["start"] = self._format_date_param(start)
-        if end:
-            params["end"] = self._format_date_param(end)
-        if next_token:
-            params["nextToken"] = next_token
-        
+
+        params = self._build_collection_params(limit, start, end, next_token)
+
         data = await self._request("GET", ENDPOINTS["sleep_collection"], params=params)
         return SleepCollection(**data)
     
@@ -760,16 +799,9 @@ class AsyncWhoopClient:
             "Fetching cycle collection",
             extra={"limit": limit}
         )
-        
-        params: Dict[str, Any] = {"limit": limit}
-        
-        if start:
-            params["start"] = self._format_date_param(start)
-        if end:
-            params["end"] = self._format_date_param(end)
-        if next_token:
-            params["nextToken"] = next_token
-        
+
+        params = self._build_collection_params(limit, start, end, next_token)
+
         data = await self._request("GET", ENDPOINTS["cycle_collection"], params=params)
         return CycleCollection(**data)
     
@@ -884,16 +916,9 @@ class AsyncWhoopClient:
             "Fetching workout collection",
             extra={"limit": limit}
         )
-        
-        params: Dict[str, Any] = {"limit": limit}
-        
-        if start:
-            params["start"] = self._format_date_param(start)
-        if end:
-            params["end"] = self._format_date_param(end)
-        if next_token:
-            params["nextToken"] = next_token
-        
+
+        params = self._build_collection_params(limit, start, end, next_token)
+
         data = await self._request("GET", ENDPOINTS["workout_collection"], params=params)
         return WorkoutCollection(**data)
     
@@ -1051,7 +1076,7 @@ class AsyncWhoopClient:
 
         if response.status_code != 200:
             raise WhoopAuthError(
-                f"Token revocation failed with status {response.status_code}: {response.text}",
+                f"Token revocation failed with status {response.status_code}: {_sanitize_error_response(response.text)}",
                 status_code=response.status_code,
             )
 
@@ -1059,7 +1084,7 @@ class AsyncWhoopClient:
         self._authenticated = False
 
         logger.info("Access token revoked")
-        
+
         logger.info("Access token revoked")
     
     # =========================================================================

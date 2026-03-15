@@ -5,6 +5,24 @@ All notable changes to WhoopYY will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - 2026-03-15
+
+### Security
+- Atomic token file permissions — `os.open()` with `0o600` at creation (no race window)
+- Sanitize API error responses in exceptions — truncate to 200 chars, strip JWT patterns
+- Validate redirect URI to localhost only — prevents binding callback server to network
+- Export path validation — blocks writes to protected system directories
+
+### Performance
+- Auto-retry on 429 rate limits with `Retry-After` backoff (capped at 120s)
+- Proactive rate limit tracking via `X-RateLimit-Remaining` header
+- TTL caching for stable endpoints — profile (1h), body measurement (24h)
+- DRY `_build_collection_params()` helper — reduces ~80 lines of duplication
+- Module-level `MS_TO_HOURS` constant in exports — avoids per-iteration computation
+- Lazy `logger.extra` dict evaluation — skip dict construction when DEBUG disabled
+- Async lock initialized in `__init__` — removes per-call `hasattr` check
+- Removed redundant exception re-raising blocks
+
 ## [0.3.0] - 2026-03-15
 
 ### Performance

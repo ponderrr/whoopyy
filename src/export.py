@@ -49,7 +49,20 @@ from .models import (
     Workout,
 )
 
+# Conversion constants
+MS_PER_HOUR = 1000 * 60 * 60
+MS_TO_HOURS = 1.0 / MS_PER_HOUR
+
 logger = get_logger(__name__)
+
+
+def _validate_export_path(filepath: Union[str, Path]) -> None:
+    """Validate that export path does not target sensitive system directories."""
+    resolved = Path(filepath).resolve()
+    _BLOCKED_PREFIXES = ("/etc", "/var", "/usr", "/bin", "/sbin", "/boot", "/proc", "/sys")
+    if any(str(resolved).startswith(p) for p in _BLOCKED_PREFIXES):
+        raise ValueError(f"Cannot write to protected directory: {resolved.parent}")
+
 
 __all__ = [
     "RecoveryTrends",
@@ -181,10 +194,12 @@ def export_recovery_csv(
         >>> count = export_recovery_csv(recoveries, "recovery.csv")
         >>> print(f"Exported {count} records")
     """
+    _validate_export_path(filepath)
+
     if not recoveries:
         logger.warning("No recovery records to export")
         return 0
-    
+
     # Filter to scored if requested
     records = recoveries if include_unscored else [r for r in recoveries if r.score]
     
@@ -274,6 +289,8 @@ def export_sleep_csv(
         >>> sleeps = client.get_all_sleep(max_records=30)
         >>> count = export_sleep_csv(sleeps, "sleep.csv", include_naps=False)
     """
+    _validate_export_path(filepath)
+
     if not sleeps:
         logger.warning("No sleep records to export")
         return 0
@@ -321,12 +338,11 @@ def export_sleep_csv(
         for sleep in records:
             if sleep.score:
                 stages = sleep.score.stage_summary
-                ms_to_hours = 1 / (1000 * 60 * 60)
 
-                light = (stages.total_light_sleep_time_milli or 0) * ms_to_hours if stages else 0
-                deep = (stages.total_slow_wave_sleep_time_milli or 0) * ms_to_hours if stages else 0
-                rem = (stages.total_rem_sleep_time_milli or 0) * ms_to_hours if stages else 0
-                awake = (stages.total_awake_time_milli or 0) * ms_to_hours if stages else 0
+                light = (stages.total_light_sleep_time_milli or 0) * MS_TO_HOURS if stages else 0
+                deep = (stages.total_slow_wave_sleep_time_milli or 0) * MS_TO_HOURS if stages else 0
+                rem = (stages.total_rem_sleep_time_milli or 0) * MS_TO_HOURS if stages else 0
+                awake = (stages.total_awake_time_milli or 0) * MS_TO_HOURS if stages else 0
 
                 writer.writerow([
                     sleep.start.date().isoformat(),
@@ -382,6 +398,8 @@ def export_cycle_csv(
     Returns:
         Number of records exported.
     """
+    _validate_export_path(filepath)
+
     if not cycles:
         logger.warning("No cycle records to export")
         return 0
@@ -463,6 +481,8 @@ def export_workout_csv(
         >>> workouts = client.get_all_workouts(max_records=100)
         >>> count = export_workout_csv(workouts, "workouts.csv")
     """
+    _validate_export_path(filepath)
+
     if not workouts:
         logger.warning("No workout records to export")
         return 0

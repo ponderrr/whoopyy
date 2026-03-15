@@ -17,6 +17,7 @@ Example:
 
 import json
 import os
+import re
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -28,7 +29,19 @@ from .type_defs import TokenData
 
 logger = get_logger(__name__)
 
+
+def _sanitize_error_response(text: str, max_length: int = 200) -> str:
+    """Truncate and sanitize API error response text to prevent token leakage."""
+    if not text:
+        return ""
+    # Strip potential token patterns
+    sanitized = re.sub(r'(eyJ[A-Za-z0-9_-]{10,})[A-Za-z0-9_-]*', r'\1...', text)
+    if len(sanitized) > max_length:
+        sanitized = sanitized[:max_length] + "...[truncated]"
+    return sanitized
+
 __all__ = [
+    "_sanitize_error_response",
     "save_tokens",
     "load_tokens",
     "delete_tokens",
@@ -72,9 +85,13 @@ def save_tokens(
         >>> # Tokens saved to .whoop_tokens.json
     """
     try:
-        with open(filepath, "w", encoding="utf-8") as f:
-            json.dump(tokens, f, indent=2)
-        os.chmod(filepath, 0o600)
+        fd = os.open(filepath, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(tokens, f, indent=2)
+        except Exception:
+            os.close(fd)
+            raise
 
         logger.info(
             "Tokens saved successfully",

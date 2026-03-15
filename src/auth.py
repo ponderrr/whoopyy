@@ -47,6 +47,7 @@ from .exceptions import WhoopAuthError, WhoopTokenError
 from .logger import get_logger
 from .type_defs import TokenData
 from .utils import (
+    _sanitize_error_response,
     calculate_expiry,
     is_token_expired,
     load_tokens,
@@ -311,7 +312,8 @@ class OAuthHandler:
         self._tokens: Optional[TokenData] = None
         self._http_client = httpx.Client(timeout=timeout)
         self._refresh_lock = threading.Lock()
-        
+        self._async_refresh_lock = asyncio.Lock()
+
         logger.info(
             "OAuth handler initialized",
             extra={
@@ -423,8 +425,10 @@ class OAuthHandler:
         """
         # Extract port from redirect URI
         parsed = urlparse(self.redirect_uri)
+        if parsed.hostname not in ("localhost", "127.0.0.1", "::1"):
+            raise WhoopAuthError("Redirect URI must use localhost for security")
         port = parsed.port or 8080
-        
+
         logger.info(
             "Starting callback server",
             extra={"port": port}
@@ -519,7 +523,7 @@ class OAuthHandler:
             return tokens
             
         except httpx.HTTPStatusError as e:
-            error_detail = e.response.text
+            error_detail = _sanitize_error_response(e.response.text)
             logger.error(
                 "Token exchange failed",
                 extra={
@@ -598,7 +602,7 @@ class OAuthHandler:
                 continue
             # 4xx or exhausted retries: fatal
             raise WhoopTokenError(
-                f"Token refresh failed with status {response.status_code}: {response.text}",
+                f"Token refresh failed with status {response.status_code}: {_sanitize_error_response(response.text)}",
                 status_code=response.status_code,
             )
 
@@ -725,9 +729,6 @@ class OAuthHandler:
         Raises:
             WhoopTokenError: If no tokens available or refresh fails.
         """
-        if not hasattr(self, "_async_refresh_lock"):
-            self._async_refresh_lock = asyncio.Lock()
-
         # Load tokens if not in memory
         if self._tokens is None:
             self._tokens = load_tokens(self.token_file)
@@ -791,7 +792,7 @@ class OAuthHandler:
                 continue
             # 4xx or exhausted retries: fatal
             raise WhoopTokenError(
-                f"Token refresh failed with status {response.status_code}: {response.text}",
+                f"Token refresh failed with status {response.status_code}: {_sanitize_error_response(response.text)}",
                 status_code=response.status_code,
             )
 

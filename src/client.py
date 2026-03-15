@@ -38,6 +38,7 @@ Context Manager:
     ...     # Resources automatically cleaned up
 """
 
+import logging
 import time
 
 from datetime import date, datetime
@@ -78,7 +79,7 @@ from .models import (
     Workout,
     WorkoutCollection,
 )
-from .utils import format_datetime
+from .utils import _sanitize_error_response, format_datetime
 
 logger = get_logger(__name__)
 
@@ -184,7 +185,8 @@ class WhoopClient:
         )
         
         self._authenticated = False
-        
+        self._cache: Dict[str, tuple[Any, float]] = {}  # {key: (value, expiry)}
+
         logger.info(
             "WhoopClient initialized",
             extra={"client_id": client_id[:8] + "..."}
@@ -294,14 +296,15 @@ class WhoopClient:
         try:
             headers = self._get_auth_headers()
             
-            logger.debug(
-                "Making API request",
-                extra={
-                    "method": method,
-                    "endpoint": endpoint,
-                    "params": params,
-                }
-            )
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(
+                    "Making API request",
+                    extra={
+                        "method": method,
+                        "endpoint": endpoint,
+                        "params": params,
+                    }
+                )
             
             start = time.perf_counter()
             response = self._http_client.request(
@@ -317,6 +320,16 @@ class WhoopClient:
                 method.upper(), endpoint, response.status_code, elapsed * 1000,
             )
 
+            # Track rate limit headers
+            remaining = response.headers.get("X-RateLimit-Remaining")
+            if remaining is not None:
+                try:
+                    remaining_int = int(str(remaining))
+                    if remaining_int <= 5:
+                        logger.warning("API rate limit low: %d requests remaining", remaining_int)
+                except (ValueError, TypeError):
+                    pass
+
             # Handle rate limiting (429)
             if response.status_code == 429:
                 retry_after_header = response.headers.get("Retry-After", "60")
@@ -324,11 +337,15 @@ class WhoopClient:
                     retry_after = int(retry_after_header)
                 except ValueError:
                     retry_after = 60
-                
-                logger.warning(
-                    "Rate limit exceeded",
-                    extra={"retry_after": retry_after}
-                )
+
+                if not _retry:
+                    logger.warning(
+                        "Rate limited, retrying after %ds", retry_after
+                    )
+                    time.sleep(min(retry_after, 120))  # Cap at 2 minutes
+                    return self._request(method, endpoint, params=params, data=data, _retry=True)
+
+                logger.warning("Rate limit exceeded after retry")
                 raise WhoopRateLimitError(
                     "Rate limit exceeded. Please wait before retrying.",
                     retry_after=retry_after,
@@ -340,7 +357,7 @@ class WhoopClient:
                 if _retry:
                     raise WhoopAuthError(
                         f"Authentication failed after token refresh. "
-                        f"Status: 401. Response: {response.text}",
+                        f"Status: 401. Response: {_sanitize_error_response(response.text)}",
                         status_code=401,
                     )
                 # Force refresh and retry once
@@ -352,16 +369,16 @@ class WhoopClient:
             if response.status_code == 404:
                 logger.error(
                     "Resource not found",
-                    extra={"url": endpoint, "error": response.text}
+                    extra={"url": endpoint, "error": _sanitize_error_response(response.text)}
                 )
                 raise WhoopNotFoundError(
-                    f"Resource not found: {endpoint}. Response: {response.text}",
+                    f"Resource not found: {endpoint}. Response: {_sanitize_error_response(response.text)}",
                     status_code=404,
                 )
 
             # Handle validation errors
             if response.status_code == 400:
-                error_detail = response.text
+                error_detail = _sanitize_error_response(response.text)
                 logger.error(
                     "Validation error",
                     extra={"error": error_detail}
@@ -370,14 +387,14 @@ class WhoopClient:
                     f"Invalid request: {error_detail}",
                     status_code=400,
                 )
-            
+
             # Handle other HTTP errors
             response.raise_for_status()
-            
+
             # Return empty dict for 204 No Content
             if response.status_code == 204:
                 return {}
-            
+
             result: Dict[str, Any] = response.json()
             return result
 
@@ -386,16 +403,13 @@ class WhoopClient:
                 "API request failed",
                 extra={
                     "status_code": e.response.status_code,
-                    "error": e.response.text,
+                    "error": _sanitize_error_response(e.response.text),
                 }
             )
             raise WhoopAPIError(
-                f"API request failed: {e.response.text}",
+                f"API request failed: {_sanitize_error_response(e.response.text)}",
                 status_code=e.response.status_code,
             )
-        except (WhoopRateLimitError, WhoopAuthError, WhoopNotFoundError, WhoopValidationError):
-            # Re-raise our custom exceptions
-            raise
         except httpx.RequestError as e:
             logger.error(
                 "Request error",
@@ -403,6 +417,19 @@ class WhoopClient:
             )
             raise WhoopNetworkError(str(e)) from e
     
+    def _cache_get(self, key: str) -> Any:
+        """Get value from cache if not expired."""
+        if key in self._cache:
+            value, expiry = self._cache[key]
+            if time.time() < expiry:
+                return value
+            del self._cache[key]
+        return None
+
+    def _cache_set(self, key: str, value: Any, ttl: int) -> None:
+        """Set value in cache with TTL in seconds."""
+        self._cache[key] = (value, time.time() + ttl)
+
     def _format_date_param(
         self,
         value: Optional[Union[datetime, date, str]]
@@ -425,7 +452,24 @@ class WhoopClient:
             return format_datetime(datetime.combine(value, datetime.min.time()))
         else:
             return value  # Assume already formatted string
-    
+
+    def _build_collection_params(
+        self,
+        limit: int,
+        start: Optional[Union[datetime, date, str]] = None,
+        end: Optional[Union[datetime, date, str]] = None,
+        next_token: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Build query parameters for paginated collection endpoints."""
+        params: Dict[str, Any] = {"limit": limit}
+        if start:
+            params["start"] = self._format_date_param(start)
+        if end:
+            params["end"] = self._format_date_param(end)
+        if next_token:
+            params["nextToken"] = next_token
+        return params
+
     # =========================================================================
     # User Profile Methods
     # =========================================================================
@@ -446,10 +490,15 @@ class WhoopClient:
             >>> print(f"Hello, {profile.first_name} {profile.last_name}!")
             >>> print(f"User ID: {profile.user_id}")
         """
+        cached = self._cache_get("profile_basic")
+        if isinstance(cached, UserProfileBasic):
+            return cached
         logger.info("Fetching basic profile")
-        
+
         data = self._request("GET", ENDPOINTS["user_profile_basic"])
-        return UserProfileBasic(**data)
+        profile = UserProfileBasic(**data)
+        self._cache_set("profile_basic", profile, 3600)  # Cache 1 hour
+        return profile
     
     def get_body_measurement(self) -> BodyMeasurement:
         """
@@ -469,10 +518,15 @@ class WhoopClient:
             >>> if body.height_meter:
             ...     print(f"Height: {body.height_meter}m ({body.height_feet}ft)")
         """
+        cached = self._cache_get("body_measurement")
+        if isinstance(cached, BodyMeasurement):
+            return cached
         logger.info("Fetching body measurements")
-        
+
         data = self._request("GET", ENDPOINTS["user_body_measurement"])
-        return BodyMeasurement(**data)
+        measurement = BodyMeasurement(**data)
+        self._cache_set("body_measurement", measurement, 86400)  # Cache 24 hours
+        return measurement
     
     # =========================================================================
     # Recovery Methods
@@ -559,16 +613,9 @@ class WhoopClient:
             "Fetching recovery collection",
             extra={"limit": limit, "has_token": next_token is not None}
         )
-        
-        params: Dict[str, Any] = {"limit": limit}
-        
-        if start:
-            params["start"] = self._format_date_param(start)
-        if end:
-            params["end"] = self._format_date_param(end)
-        if next_token:
-            params["nextToken"] = next_token
-        
+
+        params = self._build_collection_params(limit, start, end, next_token)
+
         data = self._request("GET", ENDPOINTS["recovery_collection"], params=params)
         return RecoveryCollection(**data)
     
@@ -750,16 +797,9 @@ class WhoopClient:
             "Fetching sleep collection",
             extra={"limit": limit}
         )
-        
-        params: Dict[str, Any] = {"limit": limit}
-        
-        if start:
-            params["start"] = self._format_date_param(start)
-        if end:
-            params["end"] = self._format_date_param(end)
-        if next_token:
-            params["nextToken"] = next_token
-        
+
+        params = self._build_collection_params(limit, start, end, next_token)
+
         data = self._request("GET", ENDPOINTS["sleep_collection"], params=params)
         return SleepCollection(**data)
     
@@ -919,16 +959,9 @@ class WhoopClient:
             "Fetching cycle collection",
             extra={"limit": limit}
         )
-        
-        params: Dict[str, Any] = {"limit": limit}
-        
-        if start:
-            params["start"] = self._format_date_param(start)
-        if end:
-            params["end"] = self._format_date_param(end)
-        if next_token:
-            params["nextToken"] = next_token
-        
+
+        params = self._build_collection_params(limit, start, end, next_token)
+
         data = self._request("GET", ENDPOINTS["cycle_collection"], params=params)
         return CycleCollection(**data)
     
@@ -1078,16 +1111,9 @@ class WhoopClient:
             "Fetching workout collection",
             extra={"limit": limit}
         )
-        
-        params: Dict[str, Any] = {"limit": limit}
-        
-        if start:
-            params["start"] = self._format_date_param(start)
-        if end:
-            params["end"] = self._format_date_param(end)
-        if next_token:
-            params["nextToken"] = next_token
-        
+
+        params = self._build_collection_params(limit, start, end, next_token)
+
         data = self._request("GET", ENDPOINTS["workout_collection"], params=params)
         return WorkoutCollection(**data)
     
@@ -1200,7 +1226,7 @@ class WhoopClient:
 
         if response.status_code != 200:
             raise WhoopAuthError(
-                f"Token revocation failed with status {response.status_code}: {response.text}",
+                f"Token revocation failed with status {response.status_code}: {_sanitize_error_response(response.text)}",
                 status_code=response.status_code,
             )
 
@@ -1208,7 +1234,7 @@ class WhoopClient:
         self._authenticated = False
 
         logger.info("Access token revoked")
-    
+
     # =========================================================================
     # Lifecycle Management
     # =========================================================================

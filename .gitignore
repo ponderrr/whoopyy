@@ -1,6 +1,9 @@
 # Cursor IDE
 .cursor/
 
+# Claude
+.claude/
+
 # Python
 __pycache__/
 *.py[cod]
@@ -57,21 +60,6 @@ dmypy.json
 .whoop_tokens.json
 *_tokens.json
 
-# Build
-*.egg-info/
-dist/
-build/
-
 # Documentation builds
 docs/_build/
-
-# Next.js secrets
-temp_web/.env.local
-temp_web/.env.development.local
-temp_web/.env.production.local
-temp_web/.env.test.local
-
-# Coverage and build artifacts
-htmlcov/
-dist/
-*.egg-info/
+docs/audit/

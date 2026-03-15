@@ -565,6 +565,10 @@ See the [`examples/`](examples/) directory:
 | [`async_example.py`](examples/async_example.py) | Concurrent requests with AsyncWhoopClient |
 | [`data_export.py`](examples/data_export.py) | CSV export and trend analysis |
 
+## Security
+
+Access tokens and refresh tokens are stored as plaintext JSON at `~/.whoop_tokens.json`. The SDK sets file permissions to `600` automatically. Do not commit this file. On multi-user systems, consider using a secrets manager.
+
 ## License
 
 **Proprietary License** - All Rights Reserved. See [LICENSE](LICENSE) for details.

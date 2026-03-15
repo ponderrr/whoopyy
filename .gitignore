@@ -64,3 +64,14 @@ build/
 
 # Documentation builds
 docs/_build/
+
+# Next.js secrets
+temp_web/.env.local
+temp_web/.env.development.local
+temp_web/.env.production.local
+temp_web/.env.test.local
+
+# Coverage and build artifacts
+htmlcov/
+dist/
+*.egg-info/

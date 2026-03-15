@@ -30,11 +30,10 @@ setup(
         "Typing :: Typed",
     ],
     python_requires=">=3.9",
+    keywords=["whoop", "fitness", "health", "api", "sdk", "oauth", "wearable"],
     install_requires=[
         "httpx>=0.27.0",
         "pydantic>=2.5.0",
-        "python-dotenv>=1.0.0",
-        "keyring>=24.3.0",
     ],
     extras_require={
         "dev": ["pytest", "pytest-asyncio", "pytest-cov", "mypy", "httpx"],

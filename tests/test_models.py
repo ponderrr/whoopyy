@@ -26,7 +26,7 @@ from whoopyy.models import (
     Sleep,
     SleepCollection,
     # Cycle
-    CycleStrain,
+    CycleScore,
     Cycle,
     CycleCollection,
     # Workout
@@ -259,7 +259,7 @@ class TestRecovery:
         """Create a sample recovery for testing."""
         return Recovery(
             cycle_id=123,
-            sleep_id=456,
+            sleep_id="a1b2c3d4-e5f6-7890-abcd-ef1234567890",
             user_id=789,
             created_at=datetime(2024, 1, 15, 8, 0, 0, tzinfo=timezone.utc),
             updated_at=datetime(2024, 1, 15, 8, 30, 0, tzinfo=timezone.utc),
@@ -271,11 +271,11 @@ class TestRecovery:
                 hrv_rmssd_milli=65.2
             )
         )
-    
+
     def test_valid_recovery(self, sample_recovery: Recovery) -> None:
         """Test creating a valid recovery record."""
         assert sample_recovery.cycle_id == 123
-        assert sample_recovery.sleep_id == 456
+        assert sample_recovery.sleep_id == "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
         assert sample_recovery.score_state == "SCORED"
         assert sample_recovery.score is not None
     
@@ -287,7 +287,7 @@ class TestRecovery:
         """Test is_scored when score is pending."""
         recovery = Recovery(
             cycle_id=123,
-            sleep_id=456,
+            sleep_id="a1b2c3d4-e5f6-7890-abcd-ef1234567890",
             user_id=789,
             created_at=datetime.now(tz=timezone.utc),
             updated_at=datetime.now(tz=timezone.utc),
@@ -312,8 +312,8 @@ class TestRecoveryCollection:
         """Test collection with multiple records."""
         records = [
             Recovery(
-                cycle_id=i,
-                sleep_id=i + 100,
+                cycle_id=i + 1,
+                sleep_id=f"a1b2c3d4-e5f6-7890-abcd-ef123456{i:04d}",
                 user_id=1,
                 created_at=datetime.now(tz=timezone.utc),
                 updated_at=datetime.now(tz=timezone.utc),
@@ -337,8 +337,8 @@ class TestRecoveryCollection:
         """Test iterating over collection."""
         records = [
             Recovery(
-                cycle_id=i,
-                sleep_id=i,
+                cycle_id=i + 1,
+                sleep_id=f"a1b2c3d4-e5f6-7890-abcd-ef123456{i:04d}",
                 user_id=1,
                 created_at=datetime.now(tz=timezone.utc),
                 updated_at=datetime.now(tz=timezone.utc),
@@ -347,11 +347,11 @@ class TestRecoveryCollection:
             )
             for i in range(3)
         ]
-        
+
         collection = RecoveryCollection(records=records)
-        
+
         cycle_ids = [r.cycle_id for r in collection]
-        assert cycle_ids == [0, 1, 2]
+        assert cycle_ids == [1, 2, 3]
 
 
 # =============================================================================
@@ -396,10 +396,10 @@ class TestSleepScore:
         """Create a sample sleep score."""
         return SleepScore(
             stage_summary={
-                "light_sleep_duration_milli": 14400000,      # 4 hours
-                "slow_wave_sleep_duration_milli": 5400000,   # 1.5 hours
-                "rem_sleep_duration_milli": 7200000,         # 2 hours
-                "awake_duration_milli": 1800000,             # 0.5 hours
+                "total_light_sleep_time_milli": 14400000,      # 4 hours
+                "total_slow_wave_sleep_time_milli": 5400000,   # 1.5 hours
+                "total_rem_sleep_time_milli": 7200000,         # 2 hours
+                "total_awake_time_milli": 1800000,             # 0.5 hours
             },
             sleep_needed={
                 "baseline_milli": 28800000,
@@ -438,7 +438,8 @@ class TestSleep:
     def test_valid_sleep(self) -> None:
         """Test creating a valid sleep record."""
         sleep = Sleep(
-            id=123,
+            id="a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+            cycle_id=100,
             user_id=456,
             created_at=datetime.now(tz=timezone.utc),
             updated_at=datetime.now(tz=timezone.utc),
@@ -449,15 +450,16 @@ class TestSleep:
             score_state="SCORED",
             score=None
         )
-        
-        assert sleep.id == 123
+
+        assert sleep.id == "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
         assert sleep.nap is False
         assert sleep.duration_hours == 8.0
-    
+
     def test_nap_sleep(self) -> None:
         """Test creating a nap record."""
         sleep = Sleep(
-            id=124,
+            id="a1b2c3d4-e5f6-7890-abcd-ef1234567891",
+            cycle_id=101,
             user_id=456,
             created_at=datetime.now(tz=timezone.utc),
             updated_at=datetime.now(tz=timezone.utc),
@@ -477,79 +479,73 @@ class TestSleep:
 # Cycle Model Tests
 # =============================================================================
 
-class TestCycleStrain:
-    """Tests for CycleStrain model."""
-    
+class TestCycleScore:
+    """Tests for CycleScore model."""
+
     def test_valid_strain(self) -> None:
         """Test creating a valid cycle strain."""
-        strain = CycleStrain(
-            score=14.5,
+        strain = CycleScore(
+            strain=14.5,
             average_heart_rate=72,
             max_heart_rate=175,
             kilojoule=2500.0,
-            zone_duration={"zone_one_milli": 3600000}
         )
-        
-        assert strain.score == 14.5
+
+        assert strain.strain == 14.5
         assert strain.calories == 598  # 2500 * 0.239006 rounded
-    
+
     def test_strain_level_light(self) -> None:
         """Test light strain level (0-9)."""
-        strain = CycleStrain(
-            score=5.0,
+        strain = CycleScore(
+            strain=5.0,
             average_heart_rate=65,
             max_heart_rate=120,
             kilojoule=1000.0,
-            zone_duration={}
         )
-        
+
         assert strain.strain_level == "Light"
-    
+
     def test_strain_level_moderate(self) -> None:
         """Test moderate strain level (10-13)."""
-        strain = CycleStrain(
-            score=12.0,
+        strain = CycleScore(
+            strain=12.0,
             average_heart_rate=72,
             max_heart_rate=155,
             kilojoule=2000.0,
-            zone_duration={}
         )
-        
+
         assert strain.strain_level == "Moderate"
-    
+
     def test_strain_level_strenuous(self) -> None:
         """Test strenuous strain level (14-17)."""
-        strain = CycleStrain(
-            score=15.5,
+        strain = CycleScore(
+            strain=15.5,
             average_heart_rate=85,
             max_heart_rate=175,
             kilojoule=3000.0,
-            zone_duration={}
         )
-        
+
         assert strain.strain_level == "Strenuous"
-    
+
     def test_strain_level_all_out(self) -> None:
         """Test all out strain level (18-21)."""
-        strain = CycleStrain(
-            score=19.0,
+        strain = CycleScore(
+            strain=19.0,
             average_heart_rate=95,
             max_heart_rate=190,
             kilojoule=4000.0,
-            zone_duration={}
         )
-        
+
         assert strain.strain_level == "All Out"
-    
+
     def test_strain_above_21_rejected(self) -> None:
         """Test that strain > 21 is rejected."""
         with pytest.raises(ValidationError):
-            CycleStrain(
-                score=22.0,
+            CycleScore(
+                strain=22.0,
                 average_heart_rate=72,
                 max_heart_rate=175,
                 kilojoule=2500.0,
-                zone_duration={}
             )
 
 
@@ -602,7 +598,7 @@ class TestWorkout:
     def test_valid_workout(self) -> None:
         """Test creating a valid workout."""
         workout = Workout(
-            id=123,
+            id="a1b2c3d4-e5f6-7890-abcd-ef1234567890",
             user_id=456,
             created_at=datetime.now(tz=timezone.utc),
             updated_at=datetime.now(tz=timezone.utc),
@@ -613,11 +609,11 @@ class TestWorkout:
             score_state="SCORED",
             score=None
         )
-        
-        assert workout.sport_name == "Running"
+
+        assert workout.sport_display_name == "Running"
         assert workout.duration_hours == 1.0
         assert workout.duration_minutes == 60.0
-    
+
     def test_sport_names(self) -> None:
         """Test various sport name lookups."""
         test_cases = [
@@ -628,10 +624,10 @@ class TestWorkout:
             (96, "HIIT"),
             (9999, "Unknown Sport (9999)"),
         ]
-        
+
         for sport_id, expected_name in test_cases:
             workout = Workout(
-                id=1,
+                id="a1b2c3d4-e5f6-7890-abcd-ef1234567890",
                 user_id=1,
                 created_at=datetime.now(tz=timezone.utc),
                 updated_at=datetime.now(tz=timezone.utc),
@@ -641,7 +637,7 @@ class TestWorkout:
                 sport_id=sport_id,
                 score_state="SCORED"
             )
-            assert workout.sport_name == expected_name
+            assert workout.sport_display_name == expected_name
 
 
 # =============================================================================

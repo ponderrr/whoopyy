@@ -30,7 +30,7 @@ from whoopyy.export import (
 )
 from whoopyy.models import (
     Cycle,
-    CycleStrain,
+    CycleScore,
     Recovery,
     RecoveryScore,
     Sleep,
@@ -72,7 +72,7 @@ def sample_recoveries(sample_recovery_score):
         )
         recovery = Recovery(
             cycle_id=i + 1,
-            sleep_id=i + 1,
+            sleep_id=f"a1b2c3d4-e5f6-7890-abcd-ef123456{i:04d}",
             user_id=12345,
             created_at=datetime(2024, 1, 15 - i, 8, 0, 0, tzinfo=timezone.utc),
             updated_at=datetime(2024, 1, 15 - i, 8, 30, 0, tzinfo=timezone.utc),
@@ -115,7 +115,8 @@ def sample_sleeps(sample_sleep_score):
             sleep_efficiency_percentage=88 + i % 10,
         )
         sleep = Sleep(
-            id=i + 1,
+            id=f"a1b2c3d4-e5f6-7890-abcd-ef123456{i:04d}",
+            cycle_id=i + 1,
             user_id=12345,
             created_at=datetime(2024, 1, 15 - i, 8, 0, 0, tzinfo=timezone.utc),
             updated_at=datetime(2024, 1, 15 - i, 8, 0, 0, tzinfo=timezone.utc),
@@ -135,19 +136,11 @@ def sample_cycles():
     """Create a list of sample cycle records."""
     cycles = []
     for i in range(10):
-        score = CycleStrain(
-            score=8 + (i * 2) % 10,  # Strain 8-17
+        score = CycleScore(
+            strain=8 + (i * 2) % 10,  # Strain 8-17
             average_heart_rate=70 + i * 2,
             max_heart_rate=150 + i * 5,
             kilojoule=2000 + i * 200,
-            zone_duration={
-                "zone_zero_milli": 3600000,
-                "zone_one_milli": 7200000,
-                "zone_two_milli": 5400000,
-                "zone_three_milli": 3600000,
-                "zone_four_milli": 1800000,
-                "zone_five_milli": 600000,
-            },
         )
         cycle = Cycle(
             id=i + 1,
@@ -189,7 +182,7 @@ def sample_workouts():
             altitude_change_meter=10 + i * 5,
         )
         workout = Workout(
-            id=i + 1,
+            id=f"a1b2c3d4-e5f6-7890-abcd-ef123456{i:04d}",
             user_id=12345,
             created_at=datetime(2024, 1, 15 - i, 10, 0, 0, tzinfo=timezone.utc),
             updated_at=datetime(2024, 1, 15 - i, 11, 0, 0, tzinfo=timezone.utc),
@@ -242,7 +235,7 @@ class TestAnalyzeRecoveryTrends:
         """Test that records without scores raise ValueError."""
         unscored = Recovery(
             cycle_id=1,
-            sleep_id=1,
+            sleep_id="a1b2c3d4-e5f6-7890-abcd-ef1234567890",
             user_id=12345,
             created_at=datetime.now(timezone.utc),
             updated_at=datetime.now(timezone.utc),

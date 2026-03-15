@@ -37,13 +37,6 @@ setup(
         "keyring>=24.3.0",
     ],
     extras_require={
-        "dev": [
-            "pytest>=7.4.0",
-            "pytest-asyncio>=0.21.0",
-            "pytest-cov>=4.1.0",
-            "black>=23.12.0",
-            "mypy>=1.7.0",
-            "ruff>=0.1.8",
-        ],
+        "dev": ["pytest", "pytest-asyncio", "pytest-cov", "mypy", "httpx"],
     },
 )

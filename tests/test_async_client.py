@@ -75,7 +75,7 @@ def mock_recovery_collection_response():
         "records": [
             {
                 "cycle_id": 1,
-                "sleep_id": 1,
+                "sleep_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
                 "user_id": 789,
                 "created_at": "2024-01-15T08:00:00.000Z",
                 "updated_at": "2024-01-15T08:30:00.000Z",
@@ -137,8 +137,9 @@ class TestAsyncAuthentication:
     
     def test_authenticate_success(self, async_client, mock_auth) -> None:
         """Test successful authentication."""
+        mock_auth.has_valid_tokens.return_value = False
         async_client.authenticate()
-        
+
         mock_auth.authorize.assert_called_once()
         assert async_client._authenticated is True
     
@@ -264,12 +265,12 @@ class TestAsyncRecoveryMethods:
     
     @pytest.mark.asyncio
     async def test_get_recovery(self, async_client) -> None:
-        """Test async get_recovery method."""
+        """Test async get_recovery_for_cycle method."""
         mock_response = Mock()
         mock_response.status_code = 200
         mock_response.json.return_value = {
             "cycle_id": 123,
-            "sleep_id": 456,
+            "sleep_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
             "user_id": 789,
             "created_at": "2024-01-15T08:00:00.000Z",
             "updated_at": "2024-01-15T08:30:00.000Z",
@@ -282,19 +283,19 @@ class TestAsyncRecoveryMethods:
             },
         }
         mock_response.raise_for_status = Mock()
-        
+
         async_client._http_client.request = AsyncMock(return_value=mock_response)
-        
-        recovery = await async_client.get_recovery(123)
-        
+
+        recovery = await async_client.get_recovery_for_cycle(123)
+
         assert isinstance(recovery, Recovery)
         assert recovery.cycle_id == 123
-    
+
     @pytest.mark.asyncio
     async def test_get_recovery_invalid_id(self, async_client) -> None:
-        """Test get_recovery with invalid ID."""
-        with pytest.raises(ValueError, match="Invalid recovery_id"):
-            await async_client.get_recovery(-1)
+        """Test get_recovery_for_cycle with invalid ID."""
+        with pytest.raises(ValueError, match="Invalid cycle_id"):
+            await async_client.get_recovery_for_cycle(-1)
     
     @pytest.mark.asyncio
     async def test_get_recovery_collection(
@@ -335,7 +336,8 @@ class TestAsyncSleepMethods:
         mock_response = Mock()
         mock_response.status_code = 200
         mock_response.json.return_value = {
-            "id": 123,
+            "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+            "cycle_id": 100,
             "user_id": 456,
             "created_at": "2024-01-15T08:00:00.000Z",
             "updated_at": "2024-01-15T08:00:00.000Z",
@@ -347,13 +349,13 @@ class TestAsyncSleepMethods:
             "score": None,
         }
         mock_response.raise_for_status = Mock()
-        
+
         async_client._http_client.request = AsyncMock(return_value=mock_response)
-        
+
         sleep = await async_client.get_sleep(123)
-        
+
         assert isinstance(sleep, Sleep)
-        assert sleep.id == 123
+        assert sleep.id == "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
 
 
 # =============================================================================
@@ -402,7 +404,7 @@ class TestAsyncWorkoutMethods:
         mock_response = Mock()
         mock_response.status_code = 200
         mock_response.json.return_value = {
-            "id": 123,
+            "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
             "user_id": 456,
             "created_at": "2024-01-15T10:00:00.000Z",
             "updated_at": "2024-01-15T11:00:00.000Z",
@@ -414,14 +416,14 @@ class TestAsyncWorkoutMethods:
             "score": None,
         }
         mock_response.raise_for_status = Mock()
-        
+
         async_client._http_client.request = AsyncMock(return_value=mock_response)
-        
+
         workout = await async_client.get_workout(123)
-        
+
         assert isinstance(workout, Workout)
-        assert workout.id == 123
-        assert workout.sport_name == "Running"
+        assert workout.id == "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+        assert workout.sport_display_name == "Running"
 
 
 # =============================================================================

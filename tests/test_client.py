@@ -81,7 +81,7 @@ def mock_recovery_response():
     """Mock single recovery API response."""
     return {
         "cycle_id": 123,
-        "sleep_id": 456,
+        "sleep_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
         "user_id": 789,
         "created_at": "2024-01-15T08:00:00.000Z",
         "updated_at": "2024-01-15T08:30:00.000Z",
@@ -104,7 +104,7 @@ def mock_recovery_collection_response():
         "records": [
             {
                 "cycle_id": 1,
-                "sleep_id": 1,
+                "sleep_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
                 "user_id": 789,
                 "created_at": "2024-01-15T08:00:00.000Z",
                 "updated_at": "2024-01-15T08:30:00.000Z",
@@ -118,7 +118,7 @@ def mock_recovery_collection_response():
             },
             {
                 "cycle_id": 2,
-                "sleep_id": 2,
+                "sleep_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567891",
                 "user_id": 789,
                 "created_at": "2024-01-16T08:00:00.000Z",
                 "updated_at": "2024-01-16T08:30:00.000Z",
@@ -182,8 +182,9 @@ class TestAuthentication:
     
     def test_authenticate_success(self, client, mock_auth) -> None:
         """Test successful authentication."""
+        mock_auth.has_valid_tokens.return_value = False
         client.authenticate()
-        
+
         mock_auth.authorize.assert_called_once()
         assert client._authenticated is True
     
@@ -347,28 +348,28 @@ class TestRecoveryMethods:
     """Tests for recovery API methods."""
     
     def test_get_recovery(self, client, mock_recovery_response) -> None:
-        """Test get_recovery method."""
+        """Test get_recovery_for_cycle method."""
         mock_response = Mock()
         mock_response.status_code = 200
         mock_response.json.return_value = mock_recovery_response
         mock_response.raise_for_status = Mock()
-        
+
         with patch.object(
             client._http_client,
             "request",
             return_value=mock_response
         ):
-            recovery = client.get_recovery(123)
-            
+            recovery = client.get_recovery_for_cycle(123)
+
             assert isinstance(recovery, Recovery)
             assert recovery.cycle_id == 123
             assert recovery.score is not None
             assert recovery.score.recovery_score == 75.5
-    
+
     def test_get_recovery_invalid_id(self, client) -> None:
-        """Test get_recovery with invalid ID."""
-        with pytest.raises(ValueError, match="Invalid recovery_id"):
-            client.get_recovery(-1)
+        """Test get_recovery_for_cycle with invalid ID."""
+        with pytest.raises(ValueError, match="Invalid cycle_id"):
+            client.get_recovery_for_cycle(-1)
     
     def test_get_recovery_collection(
         self, client, mock_recovery_collection_response
@@ -424,7 +425,7 @@ class TestRecoveryMethods:
             "records": [
                 {
                     "cycle_id": 1,
-                    "sleep_id": 1,
+                    "sleep_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
                     "user_id": 1,
                     "created_at": "2024-01-15T08:00:00.000Z",
                     "updated_at": "2024-01-15T08:00:00.000Z",
@@ -439,13 +440,13 @@ class TestRecoveryMethods:
             ],
             "next_token": "page2",
         }
-        
+
         # Second page
         page2_response = {
             "records": [
                 {
                     "cycle_id": 2,
-                    "sleep_id": 2,
+                    "sleep_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567891",
                     "user_id": 1,
                     "created_at": "2024-01-16T08:00:00.000Z",
                     "updated_at": "2024-01-16T08:00:00.000Z",
@@ -482,8 +483,8 @@ class TestRecoveryMethods:
         page_response = {
             "records": [
                 {
-                    "cycle_id": i,
-                    "sleep_id": i,
+                    "cycle_id": i + 1,
+                    "sleep_id": f"a1b2c3d4-e5f6-7890-abcd-ef123456{i:04d}",
                     "user_id": 1,
                     "created_at": "2024-01-15T08:00:00.000Z",
                     "updated_at": "2024-01-15T08:00:00.000Z",
@@ -527,7 +528,8 @@ class TestSleepMethods:
         mock_response = Mock()
         mock_response.status_code = 200
         mock_response.json.return_value = {
-            "id": 123,
+            "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+            "cycle_id": 100,
             "user_id": 456,
             "created_at": "2024-01-15T08:00:00.000Z",
             "updated_at": "2024-01-15T08:00:00.000Z",
@@ -539,16 +541,16 @@ class TestSleepMethods:
             "score": None,
         }
         mock_response.raise_for_status = Mock()
-        
+
         with patch.object(
             client._http_client,
             "request",
             return_value=mock_response
         ):
             sleep = client.get_sleep(123)
-            
+
             assert isinstance(sleep, Sleep)
-            assert sleep.id == 123
+            assert sleep.id == "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
             assert sleep.nap is False
     
     def test_get_sleep_invalid_id(self, client) -> None:
@@ -604,7 +606,7 @@ class TestWorkoutMethods:
         mock_response = Mock()
         mock_response.status_code = 200
         mock_response.json.return_value = {
-            "id": 123,
+            "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
             "user_id": 456,
             "created_at": "2024-01-15T10:00:00.000Z",
             "updated_at": "2024-01-15T11:00:00.000Z",
@@ -616,17 +618,17 @@ class TestWorkoutMethods:
             "score": None,
         }
         mock_response.raise_for_status = Mock()
-        
+
         with patch.object(
             client._http_client,
             "request",
             return_value=mock_response
         ):
             workout = client.get_workout(123)
-            
+
             assert isinstance(workout, Workout)
-            assert workout.id == 123
-            assert workout.sport_name == "Running"
+            assert workout.id == "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+            assert workout.sport_display_name == "Running"
 
 
 # =============================================================================

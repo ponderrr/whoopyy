@@ -1,0 +1,2 @@
+tests/test_auth.py:533: error: Item "None" of "Any | None" has no attribute "_http_client"  [union-attr]
+Found 1 error in 1 file (checked 6 source files)

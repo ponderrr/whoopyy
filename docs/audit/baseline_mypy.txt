@@ -1,0 +1,11 @@
+src/export.py:309: error: Need type annotation for "stages"  [var-annotated]
+src/export.py:312: error: Item "StageSummary" of "StageSummary | dict[Any, Any]" has no attribute "get"  [union-attr]
+src/export.py:313: error: Item "StageSummary" of "StageSummary | dict[Any, Any]" has no attribute "get"  [union-attr]
+src/export.py:314: error: Item "StageSummary" of "StageSummary | dict[Any, Any]" has no attribute "get"  [union-attr]
+src/export.py:315: error: Item "StageSummary" of "StageSummary | dict[Any, Any]" has no attribute "get"  [union-attr]
+src/export.py:410: error: "CycleScore" has no attribute "score"  [attr-defined]
+src/export.py:662: error: Argument 1 to "sum" has incompatible type "list[float | None]"; expected "Iterable[bool]"  [arg-type]
+src/export.py:663: error: Argument 1 to "sum" has incompatible type "list[float | None]"; expected "Iterable[bool]"  [arg-type]
+src/export.py:664: error: Argument 1 to "sum" has incompatible type "list[float | None]"; expected "Iterable[bool]"  [arg-type]
+src/export.py:715: error: "CycleScore" has no attribute "score"  [attr-defined]
+Found 10 errors in 1 file (checked 11 source files)

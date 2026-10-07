@@ -56,12 +56,72 @@ MS_TO_HOURS = 1.0 / MS_PER_HOUR
 logger = get_logger(__name__)
 
 
+# System locations that exports must never target. Compared against the fully
+# resolved path, so both spellings are listed where macOS symlinks them
+# (/etc -> /private/etc, /var -> /private/var).
+_PROTECTED_SYSTEM_DIRS = (
+    "/bin", "/boot", "/dev", "/etc", "/lib", "/lib64", "/Library", "/private/etc",
+    "/private/var", "/proc", "/sbin", "/sys", "/System", "/usr", "/var",
+)
+
+# Subtrees of the above that are legitimate user destinations: /usr/local, and
+# /private/var/folders (the per-user temp and cache root on macOS).
+_SYSTEM_DIR_EXCEPTIONS = ("/usr/local", "/private/var/folders")
+
+# Sensitive paths under the current user's home directory (files or directories).
+_PROTECTED_HOME_PATHS = (
+    ".ssh", ".gnupg", ".aws", ".config/gcloud", ".config/fish/config.fish",
+    ".bashrc", ".bash_profile", ".bash_login", ".bash_logout", ".profile",
+    ".zshrc", ".zshenv", ".zprofile", ".zlogin", ".zlogout", ".cshrc", ".tcshrc",
+)
+
+
+def _folded_parts(path: Union[str, Path]) -> tuple[str, ...]:
+    # Case-folded because macOS volumes are case-insensitive by default, so
+    # "/LIBRARY" and "/Private/Etc" name the same places as "/Library" and "/private/etc".
+    return tuple(part.casefold() for part in Path(path).parts)
+
+
+def _is_within(path: tuple[str, ...], root: Union[str, Path]) -> bool:
+    root_parts = _folded_parts(root)
+    return path[: len(root_parts)] == root_parts
+
+
 def _validate_export_path(filepath: Union[str, Path]) -> None:
-    """Validate that export path does not target sensitive system directories."""
-    resolved = Path(filepath).resolve()
-    _BLOCKED_PREFIXES = ("/etc", "/var", "/usr", "/bin", "/sbin", "/boot", "/proc", "/sys")
-    if any(str(resolved).startswith(p) for p in _BLOCKED_PREFIXES):
+    """Validate that an export destination is safe to write to.
+
+    The path is expanded (``~``) and fully resolved (symlinks, ``..``) before
+    any comparison, so aliases such as ``/etc`` -> ``/private/etc`` or a symlink
+    in the working directory cannot sidestep the checks. Raises ``ValueError``
+    if the resolved path is inside a protected system location, is a sensitive
+    file or directory under the current user's home (SSH/GPG/AWS/gcloud config,
+    shell rc files), or is an existing file that is not a regular file.
+
+    Only the current user's home is checked; ``/usr/local`` and the macOS
+    per-user temp directory remain writable.
+    """
+    try:
+        resolved = Path(filepath).expanduser().resolve()
+    except RuntimeError as exc:  # e.g. "~nosuchuser/x.csv"
+        raise ValueError(f"Cannot resolve export path {str(filepath)!r}: {exc}") from exc
+    parts = _folded_parts(resolved)
+
+    in_system_dir = any(_is_within(parts, d) for d in _PROTECTED_SYSTEM_DIRS)
+    if in_system_dir and not any(_is_within(parts, d) for d in _SYSTEM_DIR_EXCEPTIONS):
         raise ValueError(f"Cannot write to protected directory: {resolved.parent}")
+
+    try:
+        home = Path.home()
+    except (RuntimeError, KeyError):  # no HOME and no passwd entry (some containers)
+        home = None
+    if home is not None:
+        # Resolve each target too, so a symlinked ~/.ssh or ~/.zshrc stays protected.
+        for rel in _PROTECTED_HOME_PATHS:
+            if _is_within(parts, (home / rel).resolve()):
+                raise ValueError(f"Cannot write to protected location: {resolved}")
+
+    if resolved.exists() and not resolved.is_file():
+        raise ValueError(f"Cannot overwrite non-regular file: {resolved}")
 
 
 __all__ = [

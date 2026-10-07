@@ -156,6 +156,8 @@ class TrainingLoadTrends:
         workout_count: Total workout count.
         total_workout_minutes: Total workout duration.
         record_count: Total number of records analyzed.
+        average_daily_steps: Mean step count across scored cycles that
+            report steps (None if no cycle has step data).
     """
     
     total_strain: float
@@ -167,6 +169,7 @@ class TrainingLoadTrends:
     workout_count: int
     total_workout_minutes: float
     record_count: int
+    average_daily_steps: Optional[float] = None
 
 
 # =============================================================================
@@ -430,10 +433,12 @@ def export_cycle_csv(
             "Max HR (bpm)",
             "Kilojoules",
             "Score State",
+            "Step Count",
         ])
         
         # Data rows
         for cycle in records:
+            step_count = cycle.step_count if cycle.step_count is not None else ""
             if cycle.score:
                 writer.writerow([
                     cycle.start.date().isoformat(),
@@ -444,6 +449,7 @@ def export_cycle_csv(
                     cycle.score.max_heart_rate,
                     f"{cycle.score.kilojoule:.1f}",
                     cycle.score_state,
+                    step_count,
                 ])
             else:
                 writer.writerow([
@@ -455,6 +461,7 @@ def export_cycle_csv(
                     "",
                     "",
                     cycle.score_state,
+                    step_count,
                 ])
     
     logger.info(f"Exported {len(records)} cycle records to {filepath}")
@@ -524,6 +531,8 @@ def export_workout_csv(
         
         # Data rows
         for workout in records:
+            # sport_id is deprecated by WHOOP and may be absent in v2 responses
+            sport_id = workout.sport_id if workout.sport_id is not None else ""
             if workout.score:
                 distance_m = workout.score.distance_meter or 0
                 distance_km = distance_m / 1000 if distance_m else ""
@@ -533,7 +542,7 @@ def export_workout_csv(
                     workout.start.time().isoformat(),
                     workout.end.time().isoformat() if workout.end else "",
                     workout.sport_display_name,
-                    workout.sport_id,
+                    sport_id,
                     f"{workout.duration_minutes:.1f}" if workout.duration_minutes else "",
                     f"{workout.score.strain:.1f}",
                     workout.score.average_heart_rate,
@@ -551,7 +560,7 @@ def export_workout_csv(
                     workout.start.time().isoformat(),
                     workout.end.time().isoformat() if workout.end else "",
                     workout.sport_display_name,
-                    workout.sport_id,
+                    sport_id,
                     f"{workout.duration_minutes:.1f}" if workout.duration_minutes else "",
                     "",
                     "",
@@ -767,6 +776,10 @@ def analyze_training_load(
     )
     high_strain_days = sum(1 for s in strains if s >= high_strain_threshold)
     
+    # Step stats (step_count is None when WHOOP has no step data for a cycle)
+    step_counts = [c.step_count for c in scored_cycles if c.step_count is not None]
+    average_daily_steps = sum(step_counts) / len(step_counts) if step_counts else None
+
     # Workout stats
     workout_count = 0
     total_workout_minutes = 0.0
@@ -788,6 +801,7 @@ def analyze_training_load(
         workout_count=workout_count,
         total_workout_minutes=total_workout_minutes,
         record_count=len(scored_cycles),
+        average_daily_steps=average_daily_steps,
     )
 
 
@@ -883,6 +897,8 @@ def generate_summary_report(
         lines.append(f"Total Strain: {load_trends.total_strain:.1f}")
         lines.append(f"Average Daily Strain: {load_trends.average_daily_strain:.1f}")
         lines.append(f"Max Daily Strain: {load_trends.max_strain:.1f}")
+        if load_trends.average_daily_steps is not None:
+            lines.append(f"Average Daily Steps: {load_trends.average_daily_steps:,.0f}")
         lines.append("")
         lines.append("Strain Distribution:")
         lines.append(f"  Low (<10): {load_trends.low_strain_days} days")

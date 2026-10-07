@@ -15,7 +15,9 @@ Model Hierarchy:
         - RecoveryCollection: Paginated recovery list
     
     Sleep:
-        - SleepStage: Individual sleep stage
+        - SleepStage: Individual sleep stage (client-side helper)
+        - StageSummary: Sleep stage duration breakdown
+        - SleepNeeded: Sleep need breakdown
         - SleepScore: Sleep quality metrics
         - Sleep: Complete sleep record
         - SleepCollection: Paginated sleep list
@@ -26,10 +28,13 @@ Model Hierarchy:
         - CycleCollection: Paginated cycle list
     
     Workout:
-        - WorkoutZoneDuration: HR zone breakdown
+        - WorkoutZoneDuration (alias ZoneDurations): HR zone breakdown
         - WorkoutScore: Workout metrics
         - Workout: Complete workout record
         - WorkoutCollection: Paginated workout list
+
+    Activity ID Mapping:
+        - ActivityIdMapping: Legacy v1 activity ID to v2 UUID
 
 Example:
     >>> from whoopyy.models import Recovery, RecoveryScore
@@ -43,10 +48,11 @@ Example:
     Recovery: 75.5%
 """
 
+import warnings
 from datetime import datetime
 from typing import Optional, Dict, List, Literal
 
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import AliasChoices, BaseModel, Field, ConfigDict
 
 __all__ = [
     "UserProfileBasic",
@@ -64,10 +70,12 @@ __all__ = [
     "Cycle",
     "CycleCollection",
     "WorkoutZoneDuration",
+    "ZoneDurations",
     "WorkoutScore",
     "SPORT_NAMES",
     "Workout",
     "WorkoutCollection",
+    "ActivityIdMapping",
     "format_duration",
     "get_sport_name",
 ]
@@ -117,7 +125,8 @@ class BodyMeasurement(BaseModel):
     Body measurement data from Whoop API.
     
     Contains physical measurements used for calorie calculations.
-    All fields are optional as users may not have set all values.
+    The v2 API always returns all three fields; the model keeps them
+    optional so partially populated data still validates.
     
     Attributes:
         height_meter: Height in meters.
@@ -258,7 +267,7 @@ class Recovery(BaseModel):
     
     Attributes:
         cycle_id: Associated physiological cycle ID.
-        sleep_id: Associated sleep record ID.
+        sleep_id: Associated sleep record ID (UUID string).
         user_id: User's unique identifier.
         created_at: When the record was created.
         updated_at: When the record was last updated.
@@ -267,9 +276,9 @@ class Recovery(BaseModel):
     
     Example:
         >>> recovery = Recovery(
-        ...     cycle_id=123,
-        ...     sleep_id=456,
-        ...     user_id=789,
+        ...     cycle_id=93845,
+        ...     sleep_id="ecfc6a15-4661-442f-a9a4-f160dd7afae8",
+        ...     user_id=10129,
         ...     created_at=datetime.now(),
         ...     updated_at=datetime.now(),
         ...     score_state="SCORED",
@@ -534,7 +543,10 @@ class Sleep(BaseModel):
     Complete sleep activity record.
     
     Attributes:
-        id: Unique sleep record identifier.
+        id: Unique sleep record identifier (UUID string).
+        cycle_id: ID of the cycle this sleep belongs to.
+        v1_id: Deprecated legacy v1 integer ID. WHOOP documents that it
+            will not exist past 09/01/2025; use ``id`` instead.
         user_id: User's unique identifier.
         created_at: When the record was created.
         updated_at: When the record was last updated.
@@ -547,8 +559,9 @@ class Sleep(BaseModel):
     
     Example:
         >>> sleep = Sleep(
-        ...     id=123,
-        ...     user_id=456,
+        ...     id="ecfc6a15-4661-442f-a9a4-f160dd7afae8",
+        ...     cycle_id=93845,
+        ...     user_id=10129,
         ...     start=datetime(2024, 1, 15, 22, 30),
         ...     end=datetime(2024, 1, 16, 6, 30),
         ...     nap=False,
@@ -563,6 +576,10 @@ class Sleep(BaseModel):
     
     id: str = Field(..., description="Unique sleep record ID (UUID)")
     cycle_id: int = Field(..., description="Associated cycle ID")
+    v1_id: Optional[int] = Field(
+        None,
+        description="Deprecated legacy v1 ID. WHOOP: will not exist past 09/01/2025"
+    )
     user_id: int = Field(..., description="User's unique identifier")
     created_at: datetime = Field(..., description="Record creation timestamp")
     updated_at: datetime = Field(..., description="Last update timestamp")
@@ -704,11 +721,16 @@ class Cycle(BaseModel):
         timezone_offset: Timezone offset string.
         score_state: Scoring state (SCORED, PENDING_SCORE, UNSCORABLE).
         score: Cycle strain data (None if not yet scored).
+        step_count: Total steps taken during the cycle. None when WHOOP
+            has no step data for the cycle (e.g. the device was not worn
+            for the full cycle).
     
     Example:
         >>> cycle = Cycle(...)
         >>> if cycle.score:
-        ...     print(f"Daily strain: {cycle.score.score}")
+        ...     print(f"Daily strain: {cycle.score.strain}")
+        >>> if cycle.step_count is not None:
+        ...     print(f"Steps: {cycle.step_count}")
     """
     
     model_config = ConfigDict(frozen=True, str_strip_whitespace=True, populate_by_name=True)
@@ -727,6 +749,10 @@ class Cycle(BaseModel):
     score: Optional[CycleScore] = Field(
         None, 
         description="Cycle strain data (None if pending)"
+    )
+    step_count: Optional[int] = Field(
+        None,
+        description="Total steps taken during the cycle (None if no step data)"
     )
     
     @property
@@ -782,7 +808,8 @@ class WorkoutZoneDuration(BaseModel):
     Heart rate zone duration breakdown.
     
     Each zone represents time spent in a specific HR intensity range.
-    All durations are in milliseconds.
+    All durations are in milliseconds. Corresponds to the v2 API's
+    ``ZoneDurations`` schema; ``ZoneDurations`` is exported as an alias.
     
     Attributes:
         zone_zero_milli: Time below zone 1 (very low intensity).
@@ -855,6 +882,10 @@ class WorkoutZoneDuration(BaseModel):
         return round(total_ms / 60000, 1)
 
 
+# Alias matching the v2 API schema name (components/schemas/ZoneDurations)
+ZoneDurations = WorkoutZoneDuration
+
+
 class WorkoutScore(BaseModel):
     """
     Workout scoring metrics.
@@ -868,7 +899,9 @@ class WorkoutScore(BaseModel):
         distance_meter: Distance covered in meters (if applicable).
         altitude_gain_meter: Total elevation gain in meters.
         altitude_change_meter: Net elevation change in meters.
-        zone_duration: Time in each HR zone.
+        zone_durations: Time in each HR zone. The legacy input key
+            ``zone_duration`` is also accepted; the ``zone_duration``
+            attribute is a deprecated read-only alias.
     
     Example:
         >>> score = WorkoutScore(
@@ -876,9 +909,13 @@ class WorkoutScore(BaseModel):
         ...     average_heart_rate=145,
         ...     max_heart_rate=175,
         ...     kilojoule=800.0,
-        ...     percent_recorded=98.5
+        ...     percent_recorded=98.5,
+        ...     zone_durations=ZoneDurations(zone_three_milli=900000)
         ... )
         >>> print(f"Workout strain: {score.strain}")
+        Workout strain: 12.5
+        >>> print(f"Zone 3: {score.zone_durations.zone_three_minutes}min")
+        Zone 3: 15.0min
     """
     
     model_config = ConfigDict(frozen=True, str_strip_whitespace=True, populate_by_name=True)
@@ -924,10 +961,29 @@ class WorkoutScore(BaseModel):
         None, 
         description="Net elevation change in meters"
     )
-    zone_duration: Optional[WorkoutZoneDuration] = Field(
+    zone_durations: Optional[WorkoutZoneDuration] = Field(
         None, 
+        validation_alias=AliasChoices("zone_durations", "zone_duration"),
         description="Time in each HR zone"
     )
+
+    @property
+    def zone_duration(self) -> Optional[WorkoutZoneDuration]:
+        """
+        Deprecated alias for ``zone_durations``.
+
+        The v2 API renamed this field to ``zone_durations``. This read-only
+        alias will be removed in a future release.
+
+        Returns:
+            The same value as ``zone_durations``.
+        """
+        warnings.warn(
+            "WorkoutScore.zone_duration is deprecated; use zone_durations instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.zone_durations
     
     @property
     def calories(self) -> float:
@@ -1057,23 +1113,27 @@ SPORT_NAMES: Dict[int, str] = {
 
 class Workout(BaseModel):
     """
-    Complete workout activity record.
+    Complete workout activity record (v2 ``WorkoutV2`` schema).
     
     Attributes:
-        id: Unique workout identifier.
+        id: Unique workout identifier (UUID string).
+        v1_id: Deprecated legacy v1 integer ID. WHOOP documents that it
+            will not exist past 09/01/2025; use ``id`` instead.
         user_id: User's unique identifier.
         created_at: When the record was created.
         updated_at: When the record was last updated.
         start: Workout start time.
         end: Workout end time.
         timezone_offset: Timezone offset string.
-        sport_id: Sport type identifier.
+        sport_name: Name of the WHOOP sport performed (e.g. "running").
+        sport_id: Deprecated sport identifier. WHOOP documents that it
+            will not exist past 09/01/2025; use ``sport_name`` instead.
         score_state: Scoring state (SCORED, PENDING_SCORE, UNSCORABLE).
         score: Workout score data (None if not yet scored).
     
     Example:
         >>> workout = Workout(...)
-        >>> print(f"Activity: {workout.sport_name}")
+        >>> print(f"Activity: {workout.sport_display_name}")
         >>> print(f"Duration: {workout.duration_minutes}min")
         >>> if workout.score:
         ...     print(f"Strain: {workout.score.strain}")
@@ -1082,14 +1142,21 @@ class Workout(BaseModel):
     model_config = ConfigDict(frozen=True, str_strip_whitespace=True, populate_by_name=True)
     
     id: str = Field(..., description="Unique workout ID (UUID)")
+    v1_id: Optional[int] = Field(
+        None,
+        description="Deprecated legacy v1 ID. WHOOP: will not exist past 09/01/2025"
+    )
     user_id: int = Field(..., description="User's unique identifier")
     created_at: datetime = Field(..., description="Record creation timestamp")
     updated_at: datetime = Field(..., description="Last update timestamp")
     start: datetime = Field(..., description="Workout start time")
     end: datetime = Field(..., description="Workout end time")
     timezone_offset: str = Field(..., description="Timezone offset")
-    sport_id: int = Field(..., description="Sport identifier returned by the WHOOP API.")
-    sport_name: Optional[str] = Field(None, description="Not returned by WHOOP API. Use sport_id with constants.SPORT_NAMES for lookup.")
+    sport_name: str = Field(..., description="Name of the WHOOP sport performed (e.g. 'running')")
+    sport_id: Optional[int] = Field(
+        None,
+        description="Deprecated sport ID. WHOOP: will not exist past 09/01/2025"
+    )
     score_state: Literal["SCORED", "PENDING_SCORE", "UNSCORABLE"] = Field(
         ...,
         description="Scoring state: SCORED, PENDING_SCORE, UNSCORABLE"
@@ -1101,12 +1168,21 @@ class Workout(BaseModel):
     
     @property
     def sport_display_name(self) -> str:
-        """Get human-readable sport name (uses sport_name field or falls back to sport_id lookup)."""
+        """
+        Get human-readable sport name.
+
+        Returns ``sport_name`` unchanged when it is non-empty (WHOOP v2
+        sends lowercase names such as "running" or "hiit"). Otherwise falls
+        back to looking up the deprecated ``sport_id`` in SPORT_NAMES.
+
+        Returns:
+            Display name of the sport, or "Unknown" if neither field is set.
+        """
         if self.sport_name:
-            return self.sport_name.replace("_", " ").title()
+            return self.sport_name
         if self.sport_id is not None:
-            return SPORT_NAMES.get(self.sport_id, f"Unknown Sport ({self.sport_id})")
-        return "Unknown Sport"
+            return get_sport_name(self.sport_id)
+        return "Unknown"
     
     @property
     def duration_hours(self) -> float:
@@ -1148,6 +1224,31 @@ class WorkoutCollection(BaseModel):
     def __len__(self) -> int:
         """Return number of records in collection."""
         return len(self.records)
+
+
+# =============================================================================
+# Activity ID Mapping Models
+# =============================================================================
+
+class ActivityIdMapping(BaseModel):
+    """
+    Mapping from a legacy v1 activity ID to its v2 UUID.
+
+    Returned by WHOOP's activity-mapping endpoint, the one v1 path WHOOP
+    still documents. Use it to migrate stored v1 integer sleep or workout
+    IDs to the UUIDs that the v2 endpoints require.
+
+    Attributes:
+        v2_activity_id: The activity's v2 identifier (UUID string).
+
+    Example:
+        >>> mapping = client.get_activity_mapping(1043)
+        >>> workout = client.get_workout(mapping.v2_activity_id)
+    """
+
+    model_config = ConfigDict(frozen=True, str_strip_whitespace=True, populate_by_name=True)
+
+    v2_activity_id: str = Field(..., description="V2 unique identifier for the activity (UUID)")
 
 
 # =============================================================================

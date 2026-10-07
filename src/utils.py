@@ -5,6 +5,7 @@ This module provides helper functions for:
 - Token storage and retrieval
 - Token expiry checking
 - Datetime formatting/parsing for API compatibility
+- Rate limit header parsing
 
 Example:
     >>> from whoopyy.utils import save_tokens, load_tokens, is_token_expired
@@ -21,7 +22,7 @@ import re
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Mapping, Optional
 
 from .constants import DEFAULT_TOKEN_FILE, TOKEN_REFRESH_BUFFER_SECONDS
 from .logger import get_logger
@@ -51,6 +52,7 @@ __all__ = [
     "parse_datetime",
     "milliseconds_to_hours",
     "milliseconds_to_minutes",
+    "parse_rate_limit_reset",
 ]
 
 
@@ -346,3 +348,80 @@ def milliseconds_to_minutes(milliseconds: int) -> float:
     """
     minutes = milliseconds / (1000 * 60)
     return round(minutes, 1)
+
+
+_NON_NEGATIVE_INT_PATTERN = re.compile(r"[0-9]+")
+"""Matches a header value that is a plain non-negative integer (delta-seconds)."""
+
+
+def _get_header(headers: Mapping[str, str], name: str) -> Optional[str]:
+    """
+    Look up a header value case-insensitively.
+
+    ``httpx.Headers`` is already case-insensitive; plain dictionaries are
+    scanned for a key that matches ``name`` ignoring case.
+
+    Args:
+        headers: Response headers.
+        name: Header name to look up.
+
+    Returns:
+        The header value, or None if the header is absent.
+    """
+    value = headers.get(name)
+    if value is not None:
+        return value
+
+    lowered = name.lower()
+    for key, candidate in headers.items():
+        if isinstance(key, str) and key.lower() == lowered:
+            return candidate
+    return None
+
+
+def parse_rate_limit_reset(
+    headers: Mapping[str, str],
+    default: int = 60,
+) -> int:
+    """
+    Determine how many seconds to wait after a 429 (rate limited) response.
+
+    WHOOP documents an ``X-RateLimit-Reset`` header holding the number of
+    seconds until the current rate limit window resets, so it is preferred.
+    The standard ``Retry-After`` header (delta-seconds form) is used as a
+    fallback. Header names are matched case-insensitively, so both
+    ``httpx.Headers`` and plain dictionaries are supported. Values that are
+    not plain non-negative integers (e.g. negative numbers, decimals, or
+    HTTP-date ``Retry-After`` values) are ignored.
+
+    Args:
+        headers: Response headers from the rate-limited request.
+        default: Seconds to return when neither header holds a valid
+                 non-negative integer. Defaults to 60.
+
+    Returns:
+        Number of seconds to wait before retrying.
+
+    Example:
+        >>> parse_rate_limit_reset({"X-RateLimit-Reset": "17", "Retry-After": "30"})
+        17
+        >>> parse_rate_limit_reset({"retry-after": "30"})
+        30
+        >>> parse_rate_limit_reset({"X-RateLimit-Reset": "-1"})
+        60
+    """
+    for name in ("X-RateLimit-Reset", "Retry-After"):
+        raw = _get_header(headers, name)
+        if raw is None:
+            continue
+
+        text = str(raw).strip()
+        if _NON_NEGATIVE_INT_PATTERN.fullmatch(text):
+            return int(text)
+
+        logger.debug(
+            "Ignoring invalid rate limit header",
+            extra={"header": name, "value": text[:32]}
+        )
+
+    return default

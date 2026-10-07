@@ -89,7 +89,7 @@ def _make_workout(scored=True):
         updated_at=datetime(2024, 1, 15, tzinfo=timezone.utc),
         start=datetime(2024, 1, 15, 10, 0, tzinfo=timezone.utc),
         end=datetime(2024, 1, 15, 11, 0, tzinfo=timezone.utc),
-        timezone_offset="-05:00", sport_id=0,
+        timezone_offset="-05:00", sport_name="running",
         score_state="SCORED" if scored else "PENDING_SCORE",
         score=score,
     )

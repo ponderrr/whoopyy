@@ -131,6 +131,9 @@ def analyze_trends(recoveries, sleeps, cycles, workouts) -> None:
         print(f"   Total Strain (period): {load_trends.total_strain:.1f}")
         print(f"   Average Daily Strain: {load_trends.average_daily_strain:.1f}")
         print(f"   Max Daily Strain: {load_trends.max_strain:.1f}")
+        # Step data comes from Cycle.step_count (None when WHOOP has none)
+        if load_trends.average_daily_steps is not None:
+            print(f"   Average Daily Steps: {load_trends.average_daily_steps:,.0f}")
         print(f"\n   Strain Distribution:")
         print(f"      Low (<10): {load_trends.low_strain_days} days")
         print(f"      Moderate (10-14): {load_trends.moderate_strain_days} days")

@@ -8,6 +8,8 @@ Tests cover:
 - Edge cases and error handling
 """
 
+import warnings
+
 import pytest
 from datetime import datetime, timezone
 from pydantic import ValidationError
@@ -31,9 +33,12 @@ from whoopyy.models import (
     CycleCollection,
     # Workout
     WorkoutZoneDuration,
+    ZoneDurations,
     WorkoutScore,
     Workout,
     WorkoutCollection,
+    # Activity ID Mapping
+    ActivityIdMapping,
     # Helpers
     format_duration,
     get_sport_name,
@@ -605,17 +610,19 @@ class TestWorkout:
             start=datetime(2024, 1, 15, 10, 0, tzinfo=timezone.utc),
             end=datetime(2024, 1, 15, 11, 0, tzinfo=timezone.utc),
             timezone_offset="-05:00",
-            sport_id=0,
+            sport_name="running",
             score_state="SCORED",
             score=None
         )
 
-        assert workout.sport_display_name == "Running"
+        assert workout.sport_name == "running"
+        assert workout.sport_id is None
+        assert workout.v1_id is None
         assert workout.duration_hours == 1.0
         assert workout.duration_minutes == 60.0
 
     def test_sport_names(self) -> None:
-        """Test various sport name lookups."""
+        """Test sport_id fallback lookups when sport_name is empty."""
         test_cases = [
             (0, "Running"),
             (1, "Cycling"),
@@ -634,6 +641,7 @@ class TestWorkout:
                 start=datetime.now(tz=timezone.utc),
                 end=datetime.now(tz=timezone.utc),
                 timezone_offset="-05:00",
+                sport_name="",
                 sport_id=sport_id,
                 score_state="SCORED"
             )
@@ -700,54 +708,65 @@ class TestSportNamesConstant:
 # New Workout / WorkoutZoneDuration Model Tests
 # =============================================================================
 
-class TestWorkoutDeserializesWithSportId:
-    """Tests for Workout model using sport_id (v2 API behavior)."""
+class TestWorkoutV2SportFields:
+    """Tests for Workout sport fields in the v2 API (sport_name required, sport_id deprecated)."""
 
-    def test_workout_deserializes_with_sport_id(self) -> None:
-        """Test that a workout with sport_id (and no sport_name) parses correctly."""
-        workout = Workout(
-            id="abc-123",
-            user_id=1,
-            created_at=datetime(2024, 1, 15, 10, 0, 0, tzinfo=timezone.utc),
-            updated_at=datetime(2024, 1, 15, 11, 0, 0, tzinfo=timezone.utc),
-            start=datetime(2024, 1, 15, 10, 0, 0, tzinfo=timezone.utc),
-            end=datetime(2024, 1, 15, 11, 0, 0, tzinfo=timezone.utc),
-            timezone_offset="-05:00",
-            sport_id=0,
-            score_state="SCORED",
-        )
+    _BASE = dict(
+        user_id=1,
+        created_at=datetime(2024, 1, 15, 10, 0, 0, tzinfo=timezone.utc),
+        updated_at=datetime(2024, 1, 15, 11, 0, 0, tzinfo=timezone.utc),
+        start=datetime(2024, 1, 15, 10, 0, 0, tzinfo=timezone.utc),
+        end=datetime(2024, 1, 15, 11, 0, 0, tzinfo=timezone.utc),
+        timezone_offset="-05:00",
+        score_state="SCORED",
+    )
+
+    def test_workout_without_sport_id_parses(self) -> None:
+        """v2 workouts may omit the deprecated sport_id; it defaults to None."""
+        workout = Workout(id="abc-123", sport_name="running", **self._BASE)
+        assert workout.sport_name == "running"
+        assert workout.sport_id is None
+
+    def test_workout_sport_name_is_required(self) -> None:
+        """sport_name is required in v2; omitting it raises ValidationError."""
+        with pytest.raises(ValidationError) as exc_info:
+            Workout(id="abc-456", sport_id=1, **self._BASE)
+        assert "sport_name" in str(exc_info.value)
+
+    def test_workout_sport_name_none_rejected(self) -> None:
+        """sport_name must be a string, not None."""
+        with pytest.raises(ValidationError):
+            Workout(id="abc-456", sport_name=None, sport_id=1, **self._BASE)
+
+    def test_workout_deserializes_with_deprecated_sport_id(self) -> None:
+        """The deprecated sport_id is still accepted alongside sport_name."""
+        workout = Workout(id="abc-789", sport_name="running", sport_id=0, **self._BASE)
+        assert workout.sport_name == "running"
         assert workout.sport_id == 0
 
-    def test_workout_sport_name_is_optional(self) -> None:
-        """Test that sport_name defaults to None when not provided."""
-        workout = Workout(
-            id="abc-456",
-            user_id=1,
-            created_at=datetime(2024, 1, 15, 10, 0, 0, tzinfo=timezone.utc),
-            updated_at=datetime(2024, 1, 15, 11, 0, 0, tzinfo=timezone.utc),
-            start=datetime(2024, 1, 15, 10, 0, 0, tzinfo=timezone.utc),
-            end=datetime(2024, 1, 15, 11, 0, 0, tzinfo=timezone.utc),
-            timezone_offset="-05:00",
-            sport_id=1,
-            score_state="SCORED",
-        )
-        assert workout.sport_name is None
+    def test_workout_v1_id_optional(self) -> None:
+        """The deprecated v1_id is optional and parsed when present."""
+        without = Workout(id="abc-1", sport_name="running", **self._BASE)
+        with_v1 = Workout(id="abc-2", sport_name="running", v1_id=1043, **self._BASE)
+        assert without.v1_id is None
+        assert with_v1.v1_id == 1043
 
-    def test_workout_sport_name_explicit_value(self) -> None:
-        """Test that sport_name is stored when explicitly provided."""
-        workout = Workout(
-            id="abc-789",
-            user_id=1,
-            created_at=datetime(2024, 1, 15, 10, 0, 0, tzinfo=timezone.utc),
-            updated_at=datetime(2024, 1, 15, 11, 0, 0, tzinfo=timezone.utc),
-            start=datetime(2024, 1, 15, 10, 0, 0, tzinfo=timezone.utc),
-            end=datetime(2024, 1, 15, 11, 0, 0, tzinfo=timezone.utc),
-            timezone_offset="-05:00",
-            sport_id=0,
-            sport_name="Running",
-            score_state="SCORED",
-        )
-        assert workout.sport_name == "Running"
+    def test_workout_from_raw_v2_dict(self) -> None:
+        """A raw v2 API dict with ISO strings and no sport_id validates."""
+        workout = Workout.model_validate({
+            "id": "ecfc6a15-4661-442f-a9a4-f160dd7afae8",
+            "user_id": 9012,
+            "created_at": "2022-04-24T11:25:44.774Z",
+            "updated_at": "2022-04-24T14:25:44.774Z",
+            "start": "2022-04-24T02:25:44.774Z",
+            "end": "2022-04-24T10:25:44.774Z",
+            "timezone_offset": "-05:00",
+            "sport_name": "running",
+            "score_state": "PENDING_SCORE",
+        })
+        assert workout.sport_id is None
+        assert workout.v1_id is None
+        assert workout.score is None
 
 
 class TestWorkoutZoneDurationNullable:
@@ -884,7 +903,7 @@ def _make_workout(**kwargs) -> Workout:
         start=datetime(2024, 1, 15, 10, 0, tzinfo=timezone.utc),
         end=datetime(2024, 1, 15, 11, 0, tzinfo=timezone.utc),
         timezone_offset="-05:00",
-        sport_id=0,
+        sport_name="running",
         score_state="SCORED",
     )
     defaults.update(kwargs)
@@ -1056,6 +1075,7 @@ class TestISO8601Deserialization:
             start="2024-02-20T10:00:00.000Z",
             end="2024-02-20T11:00:00.000Z",
             timezone_offset="-08:00",
+            sport_name="yoga",
             sport_id=44,
             score_state="SCORED",
             score=None,
@@ -1077,10 +1097,366 @@ class TestISO8601Deserialization:
             start="2024-09-15T09:00:00+00:00",
             end="2024-09-15T10:00:00+00:00",
             timezone_offset="+00:00",
-            sport_id=0,
+            sport_name="running",
             score_state="SCORED",
             score=None,
         )
         assert isinstance(workout.start, datetime)
         assert workout.start.year == 2024
         assert workout.start.month == 9
+
+
+# =============================================================================
+# WorkoutScore.zone_durations (v2 rename) Tests
+# =============================================================================
+
+_ZONES = {
+    "zone_zero_milli": 300000,
+    "zone_one_milli": 600000,
+    "zone_two_milli": 900000,
+    "zone_three_milli": 900000,
+    "zone_four_milli": 600000,
+    "zone_five_milli": 300000,
+}
+
+_SCORE_BASE = {
+    "strain": 8.2463,
+    "average_heart_rate": 123,
+    "max_heart_rate": 146,
+    "kilojoule": 1569.34,
+    "percent_recorded": 100.0,
+}
+
+
+class TestWorkoutScoreZoneDurations:
+    """Tests for the zone_duration -> zone_durations rename in WorkoutScore."""
+
+    def test_v2_key_parses(self) -> None:
+        """The v2 key zone_durations parses into a WorkoutZoneDuration."""
+        score = WorkoutScore.model_validate({**_SCORE_BASE, "zone_durations": _ZONES})
+        assert isinstance(score.zone_durations, WorkoutZoneDuration)
+        assert score.zone_durations.zone_three_milli == 900000
+        assert score.zone_durations.total_minutes == 60.0
+
+    def test_legacy_key_still_parses(self) -> None:
+        """The legacy input key zone_duration is still accepted."""
+        score = WorkoutScore.model_validate({**_SCORE_BASE, "zone_duration": _ZONES})
+        assert score.zone_durations is not None
+        assert score.zone_durations.zone_one_milli == 600000
+
+    def test_v2_key_wins_when_both_present(self) -> None:
+        """If both keys are sent, zone_durations takes precedence."""
+        legacy = dict(_ZONES, zone_one_milli=1)
+        score = WorkoutScore.model_validate(
+            {**_SCORE_BASE, "zone_durations": _ZONES, "zone_duration": legacy}
+        )
+        assert score.zone_durations is not None
+        assert score.zone_durations.zone_one_milli == 600000
+
+    def test_populate_by_name_with_model_instance(self) -> None:
+        """Constructing with the field name and a model instance works."""
+        zones = WorkoutZoneDuration(**_ZONES)
+        score = WorkoutScore(**_SCORE_BASE, zone_durations=zones)
+        assert score.zone_durations == zones
+
+    def test_legacy_keyword_with_model_instance(self) -> None:
+        """Constructing with the legacy keyword and a model instance works."""
+        zones = WorkoutZoneDuration(**_ZONES)
+        score = WorkoutScore(**_SCORE_BASE, zone_duration=zones)
+        assert score.zone_durations == zones
+
+    def test_defaults_to_none(self) -> None:
+        score = WorkoutScore(**_SCORE_BASE)
+        assert score.zone_durations is None
+
+    def test_null_accepted(self) -> None:
+        score = WorkoutScore.model_validate({**_SCORE_BASE, "zone_durations": None})
+        assert score.zone_durations is None
+
+    def test_deprecated_property_warns_and_returns_same_value(self) -> None:
+        """Reading .zone_duration emits DeprecationWarning and returns zone_durations."""
+        score = WorkoutScore.model_validate({**_SCORE_BASE, "zone_durations": _ZONES})
+        with pytest.warns(DeprecationWarning, match="zone_durations"):
+            legacy = score.zone_duration
+        assert legacy is score.zone_durations
+
+    def test_deprecated_property_warns_when_none(self) -> None:
+        score = WorkoutScore(**_SCORE_BASE)
+        with pytest.warns(DeprecationWarning):
+            assert score.zone_duration is None
+
+    def test_deprecation_warning_points_at_caller(self) -> None:
+        """The warning is attributed to the caller's file, not models.py."""
+        score = WorkoutScore(**_SCORE_BASE)
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            score.zone_duration
+        assert len(caught) == 1
+        assert caught[0].category is DeprecationWarning
+        assert caught[0].filename == __file__
+
+    def test_new_field_does_not_warn(self) -> None:
+        """Reading zone_durations emits no warning."""
+        score = WorkoutScore.model_validate({**_SCORE_BASE, "zone_durations": _ZONES})
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            assert score.zone_durations is not None
+
+    def test_deprecated_property_is_read_only(self) -> None:
+        score = WorkoutScore(**_SCORE_BASE)
+        with pytest.raises((AttributeError, TypeError, ValidationError)):
+            score.zone_duration = WorkoutZoneDuration(**_ZONES)  # type: ignore[misc]
+
+    def test_model_dump_uses_v2_name(self) -> None:
+        """Serialized output uses zone_durations, never the legacy name."""
+        score = WorkoutScore.model_validate({**_SCORE_BASE, "zone_duration": _ZONES})
+        dumped = score.model_dump()
+        assert "zone_durations" in dumped
+        assert "zone_duration" not in dumped
+        assert dumped["zone_durations"]["zone_two_milli"] == 900000
+        assert "zone_duration\"" not in score.model_dump_json()
+
+    def test_round_trip(self) -> None:
+        """model_dump output validates back into an equal model."""
+        score = WorkoutScore.model_validate({**_SCORE_BASE, "zone_durations": _ZONES})
+        assert WorkoutScore.model_validate(score.model_dump()) == score
+
+
+class TestZoneDurationsAlias:
+    """ZoneDurations is a module-level alias for WorkoutZoneDuration."""
+
+    def test_alias_is_same_class(self) -> None:
+        assert ZoneDurations is WorkoutZoneDuration
+
+    def test_alias_constructs_zone_model(self) -> None:
+        zones = ZoneDurations(**_ZONES)
+        assert isinstance(zones, WorkoutZoneDuration)
+        assert zones.zone_five_minutes == 5.0
+
+    def test_alias_exported_from_models(self) -> None:
+        from whoopyy import models
+        assert "ZoneDurations" in models.__all__
+
+
+# =============================================================================
+# Cycle.step_count Tests
+# =============================================================================
+
+_CYCLE_BASE = {
+    "id": 93845,
+    "user_id": 10129,
+    "created_at": "2022-04-24T11:25:44.774Z",
+    "updated_at": "2022-04-24T14:25:44.774Z",
+    "start": "2022-04-24T02:25:44.774Z",
+    "end": "2022-04-24T10:25:44.774Z",
+    "timezone_offset": "-05:00",
+    "score_state": "SCORED",
+    "score": {
+        "strain": 5.2951527,
+        "kilojoule": 8288.297,
+        "average_heart_rate": 68,
+        "max_heart_rate": 141,
+    },
+}
+
+
+class TestCycleStepCount:
+    """Tests for the v2 Cycle.step_count field (nullable)."""
+
+    def test_step_count_parsed(self) -> None:
+        cycle = Cycle.model_validate({**_CYCLE_BASE, "step_count": 8234})
+        assert cycle.step_count == 8234
+
+    def test_step_count_null(self) -> None:
+        cycle = Cycle.model_validate({**_CYCLE_BASE, "step_count": None})
+        assert cycle.step_count is None
+
+    def test_step_count_absent_defaults_to_none(self) -> None:
+        cycle = Cycle.model_validate(_CYCLE_BASE)
+        assert cycle.step_count is None
+
+    def test_step_count_zero(self) -> None:
+        cycle = Cycle.model_validate({**_CYCLE_BASE, "step_count": 0})
+        assert cycle.step_count == 0
+
+    def test_step_count_rejects_non_integer(self) -> None:
+        with pytest.raises(ValidationError):
+            Cycle.model_validate({**_CYCLE_BASE, "step_count": "lots"})
+
+    def test_step_count_in_model_dump(self) -> None:
+        cycle = Cycle.model_validate({**_CYCLE_BASE, "step_count": 8234})
+        assert cycle.model_dump()["step_count"] == 8234
+
+
+# =============================================================================
+# Sleep.v1_id Tests
+# =============================================================================
+
+class TestSleepV1Id:
+    """Tests for the deprecated, optional Sleep.v1_id field."""
+
+    def test_v1_id_optional(self) -> None:
+        sleep = _make_sleep()
+        assert sleep.v1_id is None
+
+    def test_v1_id_parsed(self) -> None:
+        sleep = _make_sleep(v1_id=93845)
+        assert sleep.v1_id == 93845
+
+    def test_sleep_id_is_uuid_string(self) -> None:
+        sleep = _make_sleep(id="ecfc6a15-4661-442f-a9a4-f160dd7afae8")
+        assert sleep.id == "ecfc6a15-4661-442f-a9a4-f160dd7afae8"
+
+
+# =============================================================================
+# ActivityIdMapping Tests
+# =============================================================================
+
+class TestActivityIdMapping:
+    """Tests for the ActivityIdMapping model (v1 activity ID -> v2 UUID)."""
+
+    def test_model_validate(self) -> None:
+        mapping = ActivityIdMapping.model_validate(
+            {"v2_activity_id": "ecfc6a15-4661-442f-a9a4-f160dd7afae8"}
+        )
+        assert mapping.v2_activity_id == "ecfc6a15-4661-442f-a9a4-f160dd7afae8"
+
+    def test_v2_activity_id_required(self) -> None:
+        with pytest.raises(ValidationError):
+            ActivityIdMapping.model_validate({})
+
+    def test_v2_activity_id_must_be_string(self) -> None:
+        with pytest.raises(ValidationError):
+            ActivityIdMapping.model_validate({"v2_activity_id": None})
+
+    def test_whitespace_stripped(self) -> None:
+        mapping = ActivityIdMapping(v2_activity_id="  ecfc6a15-4661-442f-a9a4-f160dd7afae8 ")
+        assert mapping.v2_activity_id == "ecfc6a15-4661-442f-a9a4-f160dd7afae8"
+
+    def test_model_is_frozen(self) -> None:
+        mapping = ActivityIdMapping(v2_activity_id="ecfc6a15-4661-442f-a9a4-f160dd7afae8")
+        with pytest.raises(ValidationError):
+            mapping.v2_activity_id = "other"  # type: ignore[misc]
+
+
+# =============================================================================
+# Official v2 Spec Example Payloads
+# =============================================================================
+
+class TestV2SpecExamplePayloads:
+    """The example payloads from WHOOP's v2 OpenAPI spec validate."""
+
+    def test_workout_v2_example(self) -> None:
+        workout = Workout.model_validate({
+            "id": "ecfc6a15-4661-442f-a9a4-f160dd7afae8",
+            "v1_id": 1043,
+            "user_id": 9012,
+            "created_at": "2022-04-24T11:25:44.774Z",
+            "updated_at": "2022-04-24T14:25:44.774Z",
+            "start": "2022-04-24T02:25:44.774Z",
+            "end": "2022-04-24T10:25:44.774Z",
+            "timezone_offset": "-05:00",
+            "sport_name": "running",
+            "score_state": "SCORED",
+            "score": {
+                "strain": 8.2463,
+                "average_heart_rate": 123,
+                "max_heart_rate": 146,
+                "kilojoule": 1569.34033203125,
+                "percent_recorded": 100.0,
+                "distance_meter": 1772.77035916,
+                "altitude_gain_meter": 46.64384460449,
+                "altitude_change_meter": -0.781372010707855,
+                "zone_durations": _ZONES,
+            },
+            "sport_id": 1,
+        })
+        assert workout.sport_name == "running"
+        assert workout.v1_id == 1043
+        assert workout.score is not None
+        assert workout.score.zone_durations is not None
+        assert workout.score.zone_durations.zone_zero_milli == 300000
+
+    def test_cycle_example(self) -> None:
+        cycle = Cycle.model_validate({**_CYCLE_BASE, "step_count": 8234})
+        assert cycle.score is not None
+        assert cycle.score.strain == pytest.approx(5.2951527)
+        assert cycle.step_count == 8234
+
+    def test_sleep_example(self) -> None:
+        sleep = Sleep.model_validate({
+            "id": "ecfc6a15-4661-442f-a9a4-f160dd7afae8",
+            "cycle_id": 93845,
+            "v1_id": 93845,
+            "user_id": 10129,
+            "created_at": "2022-04-24T11:25:44.774Z",
+            "updated_at": "2022-04-24T14:25:44.774Z",
+            "start": "2022-04-24T02:25:44.774Z",
+            "end": "2022-04-24T10:25:44.774Z",
+            "timezone_offset": "-05:00",
+            "nap": False,
+            "score_state": "SCORED",
+            "score": {
+                "stage_summary": {
+                    "total_in_bed_time_milli": 30272735,
+                    "total_awake_time_milli": 1403507,
+                    "total_no_data_time_milli": 0,
+                    "total_light_sleep_time_milli": 14905851,
+                    "total_slow_wave_sleep_time_milli": 6630370,
+                    "total_rem_sleep_time_milli": 5879573,
+                    "sleep_cycle_count": 3,
+                    "disturbance_count": 12,
+                },
+                "sleep_needed": {
+                    "baseline_milli": 27395716,
+                    "need_from_sleep_debt_milli": 352230,
+                    "need_from_recent_strain_milli": 208595,
+                    "need_from_recent_nap_milli": -12312,
+                },
+                "respiratory_rate": 16.11328125,
+                "sleep_performance_percentage": 98.0,
+                "sleep_consistency_percentage": 90.0,
+                "sleep_efficiency_percentage": 91.69533848,
+            },
+        })
+        assert sleep.v1_id == 93845
+        assert sleep.cycle_id == 93845
+        assert sleep.score is not None
+
+    def test_recovery_example(self) -> None:
+        recovery = Recovery.model_validate({
+            "cycle_id": 93845,
+            "sleep_id": "123e4567-e89b-12d3-a456-426614174000",
+            "user_id": 10129,
+            "created_at": "2022-04-24T11:25:44.774Z",
+            "updated_at": "2022-04-24T14:25:44.774Z",
+            "score_state": "SCORED",
+            "score": {
+                "user_calibrating": False,
+                "recovery_score": 44.0,
+                "resting_heart_rate": 64.0,
+                "hrv_rmssd_milli": 31.813562,
+                "spo2_percentage": 95.6875,
+                "skin_temp_celsius": 33.7,
+            },
+        })
+        assert recovery.sleep_id == "123e4567-e89b-12d3-a456-426614174000"
+        assert recovery.score is not None
+
+
+# =============================================================================
+# Package Export Tests
+# =============================================================================
+
+class TestV2PackageExports:
+    """New v2 names are importable from the top-level package."""
+
+    @pytest.mark.parametrize("name", ["ActivityIdMapping", "ZoneDurations"])
+    def test_exported_from_package(self, name) -> None:
+        import whoopyy
+        assert name in whoopyy.__all__
+        assert getattr(whoopyy, name) is not None
+
+    def test_package_version_is_0_4_0(self) -> None:
+        import whoopyy
+        assert whoopyy.__version__ == "0.4.0"

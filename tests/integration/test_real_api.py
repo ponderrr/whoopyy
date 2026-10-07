@@ -1,4 +1,4 @@
-"""Integration tests against the real WHOOP API.
+"""Integration tests against the real WHOOP API (Developer API v2).
 
 These tests are skipped by default. To run them, set these environment variables:
     WHOOP_CLIENT_ID
@@ -8,16 +8,22 @@ These tests are skipped by default. To run them, set these environment variables
 
 Run with:
     pytest tests/integration/ -v --tb=long
+
+revoke_access() is deliberately NOT exercised here: it permanently revokes
+the user's OAuth grant (DELETE /developer/v2/user/access).
 """
 
 import os
 import time
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from whoopyy import WhoopClient
+from whoopyy import AsyncWhoopClient, WhoopClient
 from whoopyy.auth import OAuthHandler
+from whoopyy.exceptions import WhoopNotFoundError
 from whoopyy.models import (
+    ActivityIdMapping,
     BodyMeasurement,
     Cycle,
     CycleCollection,
@@ -37,9 +43,8 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-@pytest.fixture(scope="module")
-def client():
-    """Build a WhoopClient from env vars — no browser OAuth needed."""
+def _make_auth() -> OAuthHandler:
+    """Build an OAuthHandler with tokens injected from env vars."""
     auth = OAuthHandler(
         client_id=os.environ.get("WHOOP_CLIENT_ID", ""),
         client_secret=os.environ.get("WHOOP_CLIENT_SECRET", ""),
@@ -57,12 +62,18 @@ def client():
         "token_type": "Bearer",
         "scope": "offline",
     }
+    return auth
 
+
+@pytest.fixture(scope="module")
+def client():
+    """Build a WhoopClient from env vars — no browser OAuth needed."""
     c = WhoopClient(
         client_id=os.environ.get("WHOOP_CLIENT_ID", ""),
         client_secret=os.environ.get("WHOOP_CLIENT_SECRET", ""),
     )
-    c.auth = auth
+    c.auth.close()
+    c.auth = _make_auth()
     c._authenticated = True
     yield c
     c.close()
@@ -146,6 +157,14 @@ class TestCycles:
         assert isinstance(c, Cycle)
         assert isinstance(c.id, int)
         assert c.score_state in ("SCORED", "PENDING_SCORE", "UNSCORABLE")
+        # step_count is nullable in v2
+        assert all(x.step_count is None or isinstance(x.step_count, int) for x in result.records)
+
+    def test_cycle_collection_accepts_date_only_start(self, client):
+        """A YYYY-MM-DD start is expanded to a date-time WHOOP v2 accepts."""
+        start = (datetime.now(timezone.utc) - timedelta(days=14)).date().isoformat()
+        result = client.get_cycle_collection(start=start, limit=5)
+        assert isinstance(result, CycleCollection)
 
     def test_cycle_scored_fields(self, client):
         result = client.get_cycle_collection(limit=10)
@@ -209,9 +228,23 @@ class TestSleep:
     def test_get_single_sleep(self, client):
         collection = client.get_sleep_collection(limit=1)
         sleep_id = collection.records[0].id
+        assert isinstance(sleep_id, str)  # v2 sleep IDs are UUID strings
         sleep = client.get_sleep(sleep_id)
         assert isinstance(sleep, Sleep)
         assert sleep.id == sleep_id
+
+    def test_get_sleep_for_cycle(self, client):
+        sleeps = client.get_sleep_collection(limit=5)
+        candidates = [s for s in sleeps.records if not s.nap]
+        if not candidates:
+            pytest.skip("No non-nap sleep available")
+        expected = candidates[0]
+        try:
+            sleep = client.get_sleep_for_cycle(expected.cycle_id)
+        except WhoopNotFoundError:
+            pytest.skip("No sleep returned for this cycle")
+        assert isinstance(sleep, Sleep)
+        assert sleep.cycle_id == expected.cycle_id
 
 
 # =============================================================================
@@ -228,7 +261,9 @@ class TestWorkouts:
             pytest.skip("No workout data available for this account")
         w = result.records[0]
         assert isinstance(w, Workout)
-        assert isinstance(w.sport_id, int)
+        # v2: sport_name is required; sport_id is deprecated and may be absent
+        assert isinstance(w.sport_name, str) and w.sport_name
+        assert w.sport_id is None or isinstance(w.sport_id, int)
         assert w.score_state in ("SCORED", "PENDING_SCORE", "UNSCORABLE")
 
     def test_workout_scored_fields(self, client):
@@ -242,7 +277,7 @@ class TestWorkouts:
         assert isinstance(w.score.average_heart_rate, int)
         assert isinstance(w.score.max_heart_rate, int)
         # Zone durations are all Optional
-        zd = w.score.zone_duration
+        zd = w.score.zone_durations
         if zd:
             for zone_val in [
                 zd.zone_zero_milli, zd.zone_one_milli, zd.zone_two_milli,
@@ -261,6 +296,60 @@ class TestWorkouts:
         workout = client.get_workout(workout_id)
         assert isinstance(workout, Workout)
         assert workout.id == workout_id
+
+
+# =============================================================================
+# Activity ID Mapping
+# =============================================================================
+
+class TestActivityMapping:
+    """Tests for the v1 activity-mapping lookup (legacy ID -> v2 UUID)."""
+
+    def test_get_activity_mapping_round_trip(self, client):
+        records = list(client.get_sleep_collection(limit=10).records)
+        records += list(client.get_workout_collection(limit=10).records)
+        with_v1 = [r for r in records if r.v1_id is not None]
+        if not with_v1:
+            pytest.skip("No records carry a legacy v1_id")
+        record = with_v1[0]
+        mapping = client.get_activity_mapping(record.v1_id)
+        assert isinstance(mapping, ActivityIdMapping)
+        assert mapping.v2_activity_id == record.id
+
+
+# =============================================================================
+# Async Client
+# =============================================================================
+
+class TestAsyncClient:
+    """Smoke tests for AsyncWhoopClient against the v2 API."""
+
+    @pytest.mark.asyncio
+    async def test_async_profile_and_sleep_for_cycle(self, client):
+        c = AsyncWhoopClient(
+            client_id=os.environ.get("WHOOP_CLIENT_ID", ""),
+            client_secret=os.environ.get("WHOOP_CLIENT_SECRET", ""),
+        )
+        own_auth = c.auth
+        # Share the module client's tokens: WHOOP rotates refresh tokens, so a
+        # second handler refreshing with the original token would fail.
+        c.auth = client.auth
+        c._authenticated = True
+        try:
+            profile = await c.get_profile_basic()
+            assert isinstance(profile, UserProfileBasic)
+
+            cycles = await c.get_cycle_collection(limit=3)
+            assert isinstance(cycles, CycleCollection)
+            if cycles.records:
+                try:
+                    sleep = await c.get_sleep_for_cycle(cycles.records[0].id)
+                    assert isinstance(sleep, Sleep)
+                except WhoopNotFoundError:
+                    pass  # Not every cycle has a sleep yet (e.g. the ongoing one)
+        finally:
+            await c._http_client.aclose()
+            own_auth.close()
 
 
 # =============================================================================

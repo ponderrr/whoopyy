@@ -182,7 +182,8 @@ class WhoopRateLimitError(WhoopError):
     This is a RETRYABLE error - wait and retry.
     
     Attributes:
-        retry_after: Seconds to wait before retrying (from Retry-After header).
+        retry_after: Seconds to wait before retrying (from the X-RateLimit-Reset
+            header, falling back to Retry-After, then 60).
     
     Example:
         >>> import time

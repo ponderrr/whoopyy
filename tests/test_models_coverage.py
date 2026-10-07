@@ -240,7 +240,8 @@ class TestWorkoutScoreProperties:
 class TestWorkoutProperties:
     """Cover sport_display_name, duration_hours, duration_minutes, is_scored."""
 
-    def _make_workout(self, sport_id=0, sport_name=None, score=None, score_state="PENDING_SCORE"):
+    def _make_workout(self, sport_name="running", sport_id=None, score=None,
+                      score_state="PENDING_SCORE"):
         return Workout(
             id="w-uuid-1",
             user_id=1,
@@ -249,23 +250,42 @@ class TestWorkoutProperties:
             start=datetime(2024, 1, 1, 10, 0, tzinfo=timezone.utc),
             end=datetime(2024, 1, 1, 11, 0, tzinfo=timezone.utc),
             timezone_offset="-05:00",
-            sport_id=sport_id,
             sport_name=sport_name,
+            sport_id=sport_id,
             score_state=score_state,
             score=score,
         )
 
     def test_sport_display_name_from_sport_name(self) -> None:
+        """A non-empty sport_name is returned unchanged."""
         w = self._make_workout(sport_name="mountain_biking")
-        assert w.sport_display_name == "Mountain Biking"
+        assert w.sport_display_name == "mountain_biking"
+
+    @pytest.mark.parametrize("name", ["hiit", "mma", "non-sleep-deep-rest"])
+    def test_sport_display_name_keeps_v2_sport_name_as_is(self, name) -> None:
+        """Real v2 names are not reformatted (no 'Hiit' / 'Mma')."""
+        w = self._make_workout(sport_name=name, sport_id=96)
+        assert w.sport_display_name == name
+
+    def test_sport_display_name_prefers_sport_name_over_sport_id(self) -> None:
+        """sport_name (v2) wins over the deprecated sport_id."""
+        w = self._make_workout(sport_name="running", sport_id=44)
+        assert w.sport_display_name == "running"
 
     def test_sport_display_name_from_id(self) -> None:
-        w = self._make_workout(sport_id=44)
+        """With an empty sport_name, the deprecated sport_id is looked up."""
+        w = self._make_workout(sport_name="", sport_id=44)
         assert w.sport_display_name == "Yoga"
 
     def test_sport_display_name_unknown(self) -> None:
-        w = self._make_workout(sport_id=99999)
-        assert "Unknown" in w.sport_display_name
+        """An empty sport_name with an unknown sport_id names the ID."""
+        w = self._make_workout(sport_name="", sport_id=99999)
+        assert w.sport_display_name == "Unknown Sport (99999)"
+
+    def test_sport_display_name_no_sport_info(self) -> None:
+        """Neither sport_name nor sport_id gives 'Unknown'."""
+        w = self._make_workout(sport_name="", sport_id=None)
+        assert w.sport_display_name == "Unknown"
 
     def test_duration_hours(self) -> None:
         w = self._make_workout()

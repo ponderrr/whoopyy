@@ -82,6 +82,8 @@ cd whoopyy && pip install -e .
 
 > **Requirements:** Python 3.9+ &mdash; only two dependencies: [`httpx`](https://www.python-httpx.org/) and [`pydantic`](https://docs.pydantic.dev/) v2
 
+> **Upgrading from 0.2.x / 0.3.x?** WHOOP has retired its v1 API, and versions 0.2.0&ndash;0.3.1 send their data calls to v1 paths. 0.4.0 targets the **WHOOP Developer API v2**. It has breaking changes (`zone_duration` &rarr; `zone_durations`, `sport_id` may be `None`, `revoke_access()` now calls `DELETE /v2/user/access`). See the [CHANGELOG](CHANGELOG.md#040---2026-10-06) for the migration notes.
+
 ---
 
 ## Quick Start
@@ -180,10 +182,12 @@ flowchart TD
     E -->|200 OK| F[Parse → Pydantic Model]
     E -->|401| G[Refresh + Retry once]
     E -->|404| H[WhoopNotFoundError]
-    E -->|429| I[WhoopRateLimitError<br>with retry_after]
+    E -->|429| I[Wait X-RateLimit-Reset<br>max 120s, retry once]
+    E -->|429 on retry| L[WhoopRateLimitError<br>with retry_after]
     E -->|5xx| J[WhoopAPIError]
     E -->|Network fail| K[WhoopNetworkError]
     G --> D
+    I --> D
 
     style A fill:#e94560,stroke:#1a1a2e,color:#fff
     style F fill:#0f3460,stroke:#1a1a2e,color:#fff
@@ -193,19 +197,42 @@ flowchart TD
 
 ## API Coverage
 
-Full coverage of every WHOOP developer API endpoint:
+Full coverage of every user-data endpoint in the **WHOOP Developer API v2** (the healthcare partner API under `/v2/partner` is not covered):
 
 | Endpoint | Single | Collection | Auto-paginate | Generator |
 |:---------|:------:|:----------:|:-------------:|:---------:|
 | **Profile** | `get_profile_basic()` | — | — | — |
 | **Body** | `get_body_measurement()` | — | — | — |
 | **Recovery** | `get_recovery_for_cycle()` | `get_recovery_collection()` | `get_all_recovery()` | `iter_recovery()` |
-| **Sleep** | `get_sleep()` | `get_sleep_collection()` | `get_all_sleep()` | `iter_sleep()` |
+| **Sleep** | `get_sleep()`<br>`get_sleep_for_cycle()` | `get_sleep_collection()` | `get_all_sleep()` | `iter_sleep()` |
 | **Cycles** | `get_cycle()` | `get_cycle_collection()` | `get_all_cycles()` | `iter_cycles()` |
 | **Workouts** | `get_workout()` | `get_workout_collection()` | `get_all_workouts()` | `iter_workouts()` |
+| **ID Mapping** | `get_activity_mapping()` | — | — | — |
 | **Access** | `revoke_access()` | — | — | — |
 
-> All collection methods accept `start`, `end` (datetime filtering), `limit` (max 25), and `next_token` (pagination cursor).
+> All collection methods accept `start` (inclusive), `end` (exclusive), `limit` (max 25), and `next_token` (pagination cursor). `start`/`end` take a `datetime`, a `date`, or an ISO 8601 string. A bare `"YYYY-MM-DD"` string is sent as midnight UTC, because v2 rejects date-only values.
+
+### Endpoint Reference
+
+Paths are relative to `https://api.prod.whoop.com`. Sleep and workout IDs are UUID strings; cycle IDs are integers.
+
+| Method | HTTP | Path |
+|:-------|:----:|:-----|
+| `get_profile_basic()` | `GET` | `/developer/v2/user/profile/basic` |
+| `get_body_measurement()` | `GET` | `/developer/v2/user/measurement/body` |
+| `revoke_access()` | `DELETE` | `/developer/v2/user/access` |
+| `get_recovery_collection()` | `GET` | `/developer/v2/recovery` |
+| `get_recovery_for_cycle(cycle_id)` | `GET` | `/developer/v2/cycle/{cycle_id}/recovery` |
+| `get_sleep(sleep_id)` | `GET` | `/developer/v2/activity/sleep/{sleep_id}` |
+| `get_sleep_collection()` | `GET` | `/developer/v2/activity/sleep` |
+| `get_sleep_for_cycle(cycle_id)` | `GET` | `/developer/v2/cycle/{cycle_id}/sleep` |
+| `get_cycle(cycle_id)` | `GET` | `/developer/v2/cycle/{cycle_id}` |
+| `get_cycle_collection()` | `GET` | `/developer/v2/cycle` |
+| `get_workout(workout_id)` | `GET` | `/developer/v2/activity/workout/{workout_id}` |
+| `get_workout_collection()` | `GET` | `/developer/v2/activity/workout` |
+| `get_activity_mapping(activity_v1_id)` | `GET` | `/developer/v1/activity-mapping/{activity_v1_id}` |
+
+> The activity-mapping lookup is the only v1 path WHOOP still documents. It exists to translate legacy v1 integer sleep/workout IDs into v2 UUIDs.
 
 ---
 
@@ -232,6 +259,14 @@ The SDK handles the complete OAuth 2.0 lifecycle automatically:
 - **Automatic 401 retry** — refreshes token and replays the failed request once
 - **5xx retry on refresh** — exponential backoff on transient token server errors
 - **Secure storage** — token file created with `chmod 600`
+
+### Revoking Access
+
+```python
+client.revoke_access()   # DELETE /developer/v2/user/access (204 No Content)
+```
+
+`revoke_access()` uses WHOOP's documented revocation endpoint with the current Bearer token. It goes through the normal request path, so failures raise the usual exceptions (`WhoopValidationError`, `WhoopAuthError`, `WhoopRateLimitError`, `WhoopAPIError`). If the app receives webhooks, WHOOP stops sending them for this user. On success the client signs out: it clears its in-memory tokens, deletes the token file at `client.auth.token_file` and clears its response cache. `is_authenticated()` then returns `False`, and the next `authenticate()` runs the OAuth flow again. If the request fails, the tokens, token file and cache are left as they were.
 
 ---
 
@@ -264,7 +299,10 @@ for s in sleep_data.records:
         print(f"{'Nap' if s.nap else 'Sleep'}: {hours:.1f}h | Performance: {perf:.0f}%")
 
 # Single sleep by UUID
-sleep = client.get_sleep(sleep_id="abc-123-def")
+sleep = client.get_sleep(sleep_id="ecfc6a15-4661-442f-a9a4-f160dd7afae8")
+
+# The sleep that belongs to a cycle
+sleep = client.get_sleep_for_cycle(cycle_id=93845)
 ```
 
 ### Cycles (Daily Strain)
@@ -276,6 +314,8 @@ for c in cycles.records:
         print(f"Strain: {c.score.strain:.1f}/21 | "
               f"Level: {c.score.strain_level} | "
               f"Max HR: {c.score.max_heart_rate}bpm")
+    if c.step_count is not None:  # None when WHOOP has no step data for the cycle
+        print(f"Steps: {c.step_count:,}")
 ```
 
 ### Workouts
@@ -287,7 +327,12 @@ for w in workouts.records:
         print(f"{w.sport_display_name}: {w.duration_minutes:.0f}min | "
               f"Strain: {w.score.strain:.1f} | "
               f"Calories: {w.score.kilojoule:.0f}kJ")
+        zones = w.score.zone_durations  # HR zone breakdown (formerly zone_duration)
+        if zones:
+            print(f"  Zone 4+5: {zones.zone_four_minutes + zones.zone_five_minutes:.0f}min")
 ```
+
+`sport_name` (e.g. `"running"`) is always present in v2. `sport_id` is deprecated by WHOOP and may be `None`.
 
 ### Profile
 
@@ -308,7 +353,23 @@ from datetime import datetime, timedelta
 end = datetime.now()
 start = end - timedelta(days=30)
 data = client.get_recovery_collection(start=start, end=end)
+
+# Date-only strings work too: "2024-01-15" is sent as "2024-01-15T00:00:00.000Z"
+data = client.get_sleep_collection(start="2024-01-01", end="2024-02-01")
 ```
+
+> `start` is inclusive and `end` is exclusive. Naive `datetime` and `date` values are treated as UTC.
+
+### Legacy v1 IDs
+
+v2 identifies sleeps and workouts by UUID. If you stored integer IDs from the v1 API, look up the UUID first:
+
+```python
+mapping = client.get_activity_mapping(12345678)   # GET /developer/v1/activity-mapping/12345678
+workout = client.get_workout(mapping.v2_activity_id)
+```
+
+Passing an integer (or an all-digit string) to `get_sleep()` / `get_workout()` raises `ValueError` and points you to `get_activity_mapping()`.
 
 ---
 
@@ -426,6 +487,7 @@ classDiagram
         +datetime? end
         +Literal score_state
         +CycleScore? score
+        +int? step_count
     }
 
     class CycleScore {
@@ -438,7 +500,8 @@ classDiagram
 
     class Workout {
         +str id
-        +int sport_id
+        +str sport_name
+        +int? sport_id
         +Literal score_state
         +WorkoutScore? score
         +sport_display_name() str
@@ -450,7 +513,11 @@ classDiagram
         +int average_heart_rate
         +float kilojoule
         +float? distance_meter
-        +WorkoutZoneDuration? zone_duration
+        +ZoneDurations? zone_durations
+    }
+
+    class ActivityIdMapping {
+        +str v2_activity_id
     }
 
     Recovery --> RecoveryScore
@@ -458,6 +525,17 @@ classDiagram
     Cycle --> CycleScore
     Workout --> WorkoutScore
 ```
+
+### v2 Field Notes
+
+| Field | Notes |
+|:------|:------|
+| `Sleep.id`, `Workout.id`, `Recovery.sleep_id` | UUID strings |
+| `Workout.sport_name` | Required, e.g. `"running"` |
+| `Workout.sport_id` | Optional and deprecated by WHOOP ("will not exist past 09/01/2025"); may be `None` |
+| `Sleep.v1_id`, `Workout.v1_id` | Optional legacy v1 integer IDs, deprecated by WHOOP |
+| `Cycle.step_count` | Total steps in the cycle; `None` when WHOOP has no step data |
+| `WorkoutScore.zone_durations` | `ZoneDurations` (alias of `WorkoutZoneDuration`). The legacy input key `zone_duration` is still accepted, and the `.zone_duration` attribute still works but emits a `DeprecationWarning` |
 
 ### score_state
 
@@ -478,7 +556,7 @@ Every entity uses a `Literal` type for scoring status:
 | `RecoveryScore` | `.recovery_zone` | `"green"` / `"yellow"` / `"red"` |
 | `CycleScore` | `.strain_level` | `"Light"` / `"Moderate"` / `"Strenuous"` / `"All Out"` |
 | `Sleep` | `.duration_hours` | Total sleep duration as `float` |
-| `Workout` | `.sport_display_name` | Human-readable sport name from `sport_id` |
+| `Workout` | `.sport_display_name` | `sport_name` as WHOOP sends it, e.g. `"running"` (falls back to the deprecated `sport_id`) |
 | `Workout` | `.duration_minutes` | Workout duration as `float` |
 | `UserProfileBasic` | `.full_name` | `"First Last"` |
 | `BodyMeasurement` | `.height_feet` / `.weight_pounds` | Imperial conversions |
@@ -502,6 +580,9 @@ export_recovery_csv(recoveries, "recovery_q1.csv")
 
 sleeps = client.get_all_sleep(max_records=90)
 export_sleep_csv(sleeps, "sleep_q1.csv")
+
+cycles = client.get_all_cycles(max_records=90)
+export_cycle_csv(cycles, "cycles_q1.csv")   # last column: Step Count
 ```
 
 ### Trend Analysis
@@ -522,6 +603,8 @@ print(f"Avg Duration:  {sleep_trends.average_duration_hours:.1f}h")
 # Training load
 load = analyze_training_load(cycles, workouts)
 print(f"Weekly Strain:  {load.total_strain:.1f}")
+if load.average_daily_steps is not None:      # None when no cycle has step data
+    print(f"Avg Steps:      {load.average_daily_steps:,.0f}")
 
 # Full report
 from whoopyy import generate_summary_report
@@ -561,7 +644,7 @@ graph TD
 | `WhoopTokenError` | Token refresh failure | No — re-authenticate |
 | `WhoopNotFoundError` | Resource not found (404) | No |
 | `WhoopValidationError` | Bad request params (400) | No — fix request |
-| `WhoopRateLimitError` | Rate limited (429) | Yes — use `.retry_after` |
+| `WhoopRateLimitError` | Still rate limited (429) after the automatic retry | Yes — use `.retry_after` |
 | `WhoopNetworkError` | DNS, timeout, connection | Yes — backoff |
 | `WhoopAPIError` | Other HTTP errors | 5xx yes, 4xx no |
 
@@ -599,6 +682,8 @@ The SDK handles common failure modes automatically:
 | Scenario | SDK Behavior |
 |:---------|:-------------|
 | Token expires mid-request | Refreshes token + retries the request once |
+| Rate limited (429) | Waits `X-RateLimit-Reset` seconds (falls back to `Retry-After`, then 60s; capped at 120s), retries once, then raises `WhoopRateLimitError` |
+| `X-RateLimit-Remaining` drops to 5 or less | Logs a warning |
 | Two threads refresh simultaneously | Mutex ensures only one refresh fires |
 | Token server returns 503 | Retries up to 3x with exponential backoff |
 | User never completes OAuth | Callback server times out after 120s |

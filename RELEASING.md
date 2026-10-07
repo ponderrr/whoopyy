@@ -31,7 +31,7 @@
    - Click **Publish release**
 
 5. **The publish workflow fires automatically:**
-   - Tests run (382 tests, 0 failures)
+   - Tests run (600+ tests, 0 failures)
    - Package builds + `twine check`
    - Publishes to TestPyPI
    - Installs from TestPyPI and verifies all imports
@@ -44,12 +44,12 @@
    - Click "Review deployments" → approve `pypi` environment
 
 ### Versioning (semver)
-- **PATCH** (0.3.x) — bug fixes, no API changes
+- **PATCH** (0.4.x) — bug fixes, no API changes
 - **MINOR** (0.x.0) — new features, backwards compatible
 - **MAJOR** (x.0.0) — breaking API changes
 
 ### Current state
-- Version: 0.3.1
+- Version: 0.4.0
 - License: GPL v3
 - PyPI: https://pypi.org/project/whoopyy/
 - TestPyPI: https://test.pypi.org/project/whoopyy/

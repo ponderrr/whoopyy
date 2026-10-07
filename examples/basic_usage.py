@@ -130,7 +130,8 @@ def main() -> None:
             if workout_collection.records:
                 for workout in workout_collection.records:
                     if workout.score:
-                        sport = workout.sport_name
+                        # sport_name is always present in v2; sport_id is deprecated
+                        sport = workout.sport_display_name
                         strain = workout.score.strain
                         duration = workout.duration_minutes or 0
                         

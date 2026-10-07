@@ -1,6 +1,6 @@
 [project]
 name = "whoopyy"
-version = "0.3.1"
+version = "0.4.0"
 description = "A complete Python SDK for the WHOOP Developer API"
 readme = "README.md"
 requires-python = ">=3.9"

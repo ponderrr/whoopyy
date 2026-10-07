@@ -3,6 +3,8 @@ API constants and configuration for WhoopYY.
 
 This module contains all static configuration values used throughout the SDK.
 No magic numbers - all values are named constants with clear documentation.
+
+API paths target the WHOOP Developer API v2 (the v1 API has been retired).
 """
 
 import os
@@ -57,27 +59,37 @@ OAUTH_TOKEN_URL: Final[str] = f"{AUTH_BASE_URL}/oauth2/token"
 
 ENDPOINTS: Final[dict[str, str]] = {
     # User Profile
-    "user_profile_basic": "/developer/v1/user/profile/basic",
-    "user_body_measurement": "/developer/v1/user/measurement/body",
+    "user_profile_basic": "/developer/v2/user/profile/basic",
+    "user_body_measurement": "/developer/v2/user/measurement/body",
+    "user_access": "/developer/v2/user/access",  # DELETE revokes the user's OAuth access
 
     # Recovery
-    "recovery_collection": "/developer/v1/recovery",
-    "recovery_for_cycle": "/developer/v1/cycle/{cycle_id}/recovery",
+    "recovery_collection": "/developer/v2/recovery",
+    "recovery_for_cycle": "/developer/v2/cycle/{cycle_id}/recovery",
 
-    # Sleep
-    "sleep_single": "/developer/v1/activity/sleep/{sleep_id}",
-    "sleep_collection": "/developer/v1/activity/sleep",
+    # Sleep (sleep_id is a UUID string)
+    "sleep_single": "/developer/v2/activity/sleep/{sleep_id}",
+    "sleep_collection": "/developer/v2/activity/sleep",
+    "sleep_for_cycle": "/developer/v2/cycle/{cycle_id}/sleep",
 
-    # Cycle (Daily Strain)
-    "cycle_single": "/developer/v1/cycle/{cycle_id}",
-    "cycle_collection": "/developer/v1/cycle",
+    # Cycle (Daily Strain; cycle_id is an int64)
+    "cycle_single": "/developer/v2/cycle/{cycle_id}",
+    "cycle_collection": "/developer/v2/cycle",
 
-    # Workout
-    "workout_single": "/developer/v1/activity/workout/{workout_id}",
-    "workout_collection": "/developer/v1/activity/workout",
+    # Workout (workout_id is a UUID string)
+    "workout_single": "/developer/v2/activity/workout/{workout_id}",
+    "workout_collection": "/developer/v2/activity/workout",
+
+    # Activity ID Mapping (legacy v1 integer sleep/workout ID -> v2 UUID)
+    "activity_mapping": "/developer/v1/activity-mapping/{activity_v1_id}",
 }
 """
-API endpoint paths mapped by resource type.
+API endpoint paths mapped by resource type (WHOOP Developer API v2).
+
+All data endpoints use the v2 API. Sleeps and workouts are identified by
+UUID strings; cycles are identified by integers. The one remaining v1 path,
+``activity_mapping``, is still documented by WHOOP and exists solely to look
+up the v2 UUID for a legacy v1 integer sleep or workout ID.
 
 Note: Endpoints with {id} placeholders require string formatting before use.
 """

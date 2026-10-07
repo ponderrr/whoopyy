@@ -14,7 +14,7 @@ Example:
     >>> print(f"Hello, {profile.first_name}!")
 """
 
-__version__ = "0.3.1"
+__version__ = "0.4.0"
 __author__ = "Robert Ponder"
 
 # Exceptions
@@ -50,9 +50,12 @@ from .models import (
     CycleCollection,
     # Workout
     WorkoutZoneDuration,
+    ZoneDurations,
     WorkoutScore,
     Workout,
     WorkoutCollection,
+    # Activity ID Mapping
+    ActivityIdMapping,
     # Helpers
     format_duration,
     get_sport_name,
@@ -123,9 +126,12 @@ __all__ = [
     "CycleCollection",
     # Workout Models
     "WorkoutZoneDuration",
+    "ZoneDurations",
     "WorkoutScore",
     "Workout",
     "WorkoutCollection",
+    # Activity ID Mapping Models
+    "ActivityIdMapping",
     # Helpers
     "format_duration",
     "get_sport_name",

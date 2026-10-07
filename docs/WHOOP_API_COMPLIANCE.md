@@ -1,5 +1,38 @@
 # WHOOP API - Rate Limits & Compliance Rules
 
+## 🔢 API VERSION (v2)
+
+WHOOP has **retired the v1 API** (`/developer/v1/...`). All data access goes through **v2**.
+Base URL: `https://api.prod.whoop.com/developer`
+
+| HTTP | Path | Scope | SDK method |
+|------|------|-------|------------|
+| `GET` | `/v2/user/profile/basic` | `read:profile` | `get_profile_basic()` |
+| `GET` | `/v2/user/measurement/body` | `read:body_measurement` | `get_body_measurement()` |
+| `DELETE` | `/v2/user/access` | any valid token | `revoke_access()` |
+| `GET` | `/v2/recovery` | `read:recovery` | `get_recovery_collection()` |
+| `GET` | `/v2/cycle/{cycleId}/recovery` | `read:recovery` | `get_recovery_for_cycle()` |
+| `GET` | `/v2/activity/sleep` | `read:sleep` | `get_sleep_collection()` |
+| `GET` | `/v2/activity/sleep/{sleepId}` | `read:sleep` | `get_sleep()` |
+| `GET` | `/v2/cycle/{cycleId}/sleep` | — (none listed in spec) | `get_sleep_for_cycle()` |
+| `GET` | `/v2/cycle` | `read:cycles` | `get_cycle_collection()` |
+| `GET` | `/v2/cycle/{cycleId}` | `read:cycles` | `get_cycle()` |
+| `GET` | `/v2/activity/workout` | `read:workout` | `get_workout_collection()` |
+| `GET` | `/v2/activity/workout/{workoutId}` | `read:workout` | `get_workout()` |
+| `GET` | `/v1/activity-mapping/{activityV1Id}` | — (none listed in spec) | `get_activity_mapping()` |
+
+**Key v2 facts:**
+- Sleep and workout IDs are **UUID strings**; cycle IDs are **int64**
+- `/v1/activity-mapping/{activityV1Id}` is the **only v1 path WHOOP still documents**. It maps a legacy v1 integer sleep/workout ID to its v2 UUID (`v2_activity_id`)
+- Collections: `limit` max **25** (default 10), `start` inclusive, `end` exclusive (defaults to now), cursor via `nextToken`. `start`/`end` must be **date-time** values; date-only strings are rejected
+- **Revocation:** `DELETE /v2/user/access` with the user's Bearer token returns `204 No Content`. It revokes the access token the user granted, and webhooks stop for that user. (Do not use `/oauth/oauth2/revoke`; it is not WHOOP's documented revocation method)
+- Workouts: `sport_name` is **required**. `sport_id` and `v1_id` are deprecated ("will not exist past 09/01/2025"); `Sleep.v1_id` likewise
+- Workout score: HR zones are in `zone_durations` (not `zone_duration`)
+- Cycles: `step_count` (int32, **nullable**) holds total steps in the cycle and is `null` when no step data exists (added by WHOOP 2026-09-23)
+- Partner endpoints (`/v2/partner/*`) are for healthcare partners and are out of scope for this SDK
+
+---
+
 ## 🚦 RATE LIMITS (DEFAULT)
 
 ### Per-Minute Limit
@@ -26,6 +59,8 @@ X-RateLimit-Reset: "3"
 - `X-RateLimit-Limit`: Shows all active limits and time windows
 - `X-RateLimit-Remaining`: Requests left in closest-to-exceeded window
 - `X-RateLimit-Reset`: Seconds until closest limit resets
+
+**How WhoopYY uses them:** after a 429, the SDK waits `X-RateLimit-Reset` seconds (falling back to `Retry-After`, then 60s; capped at 120s), retries once, and then raises `WhoopRateLimitError` with `retry_after`. It logs a warning when `X-RateLimit-Remaining` is 5 or less.
 
 ### 429 Response
 
@@ -131,7 +166,7 @@ try {
 ```
 
 **4. Use Webhooks (Future Enhancement)**
-- Register for webhook events: `recovery.updated`, `sleep.created`, `workout.created`
+- Register for webhook events: `recovery.updated`, `recovery.deleted`, `sleep.updated`, `sleep.deleted`, `workout.updated`, `workout.deleted` (there are no `*.created` events; new data arrives as `*.updated`)
 - Your server receives events instantly (no polling needed)
 - Only fetch data when actually changed
 

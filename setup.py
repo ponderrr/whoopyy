@@ -7,7 +7,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setup(
     name="whoopyy",
-    version="0.3.1",
+    version="0.4.0",
     author="Andrew Ponder",
     author_email="raponder.business@gmail.com",
     description="Complete Python SDK for Whoop API",

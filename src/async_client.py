@@ -1,9 +1,9 @@
 """
 Async Whoop API client for concurrent operations.
 
-This module provides an async/await interface for the Whoop API,
-enabling concurrent requests for better performance when fetching
-multiple data types simultaneously.
+This module provides an async/await interface for the Whoop API
+(WHOOP Developer API v2), enabling concurrent requests for better
+performance when fetching multiple data types simultaneously.
 
 Features:
     - Full async/await support with httpx.AsyncClient
@@ -40,6 +40,8 @@ Note:
 
 import asyncio
 import logging
+import re
+import uuid
 
 from datetime import date, datetime
 from types import TracebackType
@@ -52,7 +54,6 @@ from . import __version__
 from .auth import OAuthHandler
 from .constants import (
     API_BASE_URL,
-    AUTH_BASE_URL,
     DEFAULT_TIMEOUT_SECONDS,
     DEFAULT_TOKEN_FILE,
     ENDPOINTS,
@@ -68,6 +69,7 @@ from .exceptions import (
 )
 from .logger import get_logger
 from .models import (
+    ActivityIdMapping,
     BodyMeasurement,
     Cycle,
     CycleCollection,
@@ -79,11 +81,19 @@ from .models import (
     Workout,
     WorkoutCollection,
 )
-from .utils import _sanitize_error_response, format_datetime
+from .utils import (
+    _sanitize_error_response,
+    delete_tokens,
+    format_datetime,
+    parse_rate_limit_reset,
+)
 
 logger = get_logger(__name__)
 
 __all__ = ["AsyncWhoopClient"]
+
+_DATE_ONLY_PATTERN = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
+"""Matches a date-only string (YYYY-MM-DD), which WHOOP v2 rejects for start/end."""
 
 
 class AsyncWhoopClient:
@@ -264,7 +274,7 @@ class AsyncWhoopClient:
         
         Args:
             method: HTTP method (GET, POST, DELETE).
-            endpoint: API endpoint path.
+            endpoint: API endpoint path (e.g., "/developer/v2/recovery").
             params: Query parameters.
             data: JSON body data.
         
@@ -314,15 +324,11 @@ class AsyncWhoopClient:
 
             # Handle rate limiting
             if response.status_code == 429:
-                retry_after_header = response.headers.get("Retry-After", "60")
-                try:
-                    retry_after = int(retry_after_header)
-                except ValueError:
-                    retry_after = 60
+                retry_after = parse_rate_limit_reset(response.headers)
 
                 if not _retry:
                     logger.warning("Rate limited, retrying after %ds", retry_after)
-                    await asyncio.sleep(min(retry_after, 120))
+                    await asyncio.sleep(min(retry_after, 120))  # Cap at 2 minutes
                     return await self._request(method, endpoint, params=params, data=data, _retry=True)
 
                 logger.warning("Rate limit exceeded after retry")
@@ -409,7 +415,25 @@ class AsyncWhoopClient:
         self,
         value: Optional[Union[datetime, date, str]]
     ) -> Optional[str]:
-        """Format date parameter for API request."""
+        """
+        Format date parameter for API request.
+
+        WHOOP v2 declares ``start`` and ``end`` as ``date-time`` and rejects
+        date-only strings, so a string of exactly ``YYYY-MM-DD`` is expanded
+        to midnight UTC (``YYYY-MM-DDT00:00:00.000Z``). Naive datetimes and
+        ``date`` objects are treated as UTC. Any other string is passed
+        through unchanged.
+
+        Args:
+            value: Date as datetime, date, or ISO string.
+
+        Returns:
+            ISO 8601 formatted string or None.
+
+        Example:
+            >>> client._format_date_param("2024-01-15")
+            '2024-01-15T00:00:00.000Z'
+        """
         if value is None:
             return None
         
@@ -417,8 +441,10 @@ class AsyncWhoopClient:
             return format_datetime(value)
         elif isinstance(value, date):
             return format_datetime(datetime.combine(value, datetime.min.time()))
+        elif _DATE_ONLY_PATTERN.fullmatch(value):
+            return f"{value}T00:00:00.000Z"
         else:
-            return value
+            return value  # Assume already formatted date-time string
 
     def _build_collection_params(
         self,
@@ -492,6 +518,10 @@ class AsyncWhoopClient:
         
         Returns:
             Recovery record with score and metadata.
+
+        Raises:
+            WhoopAPIError: If request fails or recovery not found.
+            ValueError: If cycle_id is invalid.
         """
         if cycle_id <= 0:
             raise ValueError(f"Invalid cycle_id: {cycle_id}")
@@ -516,8 +546,8 @@ class AsyncWhoopClient:
         Get collection of recovery records with pagination.
         
         Args:
-            start: Start date/datetime for filtering.
-            end: End date/datetime for filtering.
+            start: Start date/datetime for filtering (inclusive).
+            end: End date/datetime for filtering (exclusive).
             limit: Number of records per page (1-25).
             next_token: Pagination token from previous response.
         
@@ -631,17 +661,37 @@ class AsyncWhoopClient:
     # Sleep Methods
     # =========================================================================
     
-    async def get_sleep(self, sleep_id: str) -> Sleep:
+    async def get_sleep(self, sleep_id: Union[str, uuid.UUID]) -> Sleep:
         """
         Get specific sleep record by ID.
 
         Args:
-            sleep_id: Sleep record UUID string.
+            sleep_id: Sleep record UUID, as a string or ``uuid.UUID``. To
+                look up the UUID for a legacy v1 integer sleep ID, use
+                get_activity_mapping().
 
         Returns:
             Sleep record with score and metadata.
+
+        Raises:
+            WhoopAPIError: If request fails or sleep not found.
+            ValueError: If sleep_id is empty or is a legacy v1 integer ID.
+
+        Example:
+            >>> sleep = await client.get_sleep("ecfc6a15-4661-442f-a9a4-f160dd7afae8")
+            >>> print(f"Duration: {sleep.duration_hours}h")
         """
-        if not sleep_id or not sleep_id.strip():
+        if isinstance(sleep_id, uuid.UUID):
+            sleep_id = str(sleep_id)
+        if isinstance(sleep_id, int) or (
+            isinstance(sleep_id, str) and sleep_id.strip().isdigit()
+        ):
+            raise ValueError(
+                f"Invalid sleep_id: {sleep_id!r}. WHOOP v2 sleep IDs are UUID "
+                "strings; use get_activity_mapping() to look up the UUID for a "
+                "legacy v1 integer ID."
+            )
+        if not isinstance(sleep_id, str) or not sleep_id.strip():
             raise ValueError(f"Invalid sleep_id: {sleep_id!r}")
         
         logger.info(
@@ -653,6 +703,36 @@ class AsyncWhoopClient:
         data = await self._request("GET", endpoint)
         return Sleep(**data)
     
+    async def get_sleep_for_cycle(self, cycle_id: int) -> Sleep:
+        """
+        Get the sleep record for a specific cycle.
+
+        Args:
+            cycle_id: Cycle ID to get sleep for.
+
+        Returns:
+            Sleep record with score and metadata.
+
+        Raises:
+            WhoopAPIError: If request fails or sleep not found.
+            ValueError: If cycle_id is invalid.
+
+        Example:
+            >>> sleep = await client.get_sleep_for_cycle(93845)
+            >>> print(f"Duration: {sleep.duration_hours}h")
+        """
+        if cycle_id <= 0:
+            raise ValueError(f"Invalid cycle_id: {cycle_id}")
+
+        logger.info(
+            "Fetching sleep for cycle",
+            extra={"cycle_id": cycle_id}
+        )
+
+        endpoint = ENDPOINTS["sleep_for_cycle"].format(cycle_id=cycle_id)
+        data = await self._request("GET", endpoint)
+        return Sleep(**data)
+
     async def get_sleep_collection(
         self,
         start: Optional[Union[datetime, date, str]] = None,
@@ -865,17 +945,37 @@ class AsyncWhoopClient:
     # Workout Methods
     # =========================================================================
     
-    async def get_workout(self, workout_id: str) -> Workout:
+    async def get_workout(self, workout_id: Union[str, uuid.UUID]) -> Workout:
         """
         Get specific workout by ID.
 
         Args:
-            workout_id: Workout UUID string.
+            workout_id: Workout UUID, as a string or ``uuid.UUID``. To
+                look up the UUID for a legacy v1 integer workout ID, use
+                get_activity_mapping().
 
         Returns:
             Workout record with score and metadata.
+
+        Raises:
+            WhoopAPIError: If request fails or workout not found.
+            ValueError: If workout_id is empty or is a legacy v1 integer ID.
+
+        Example:
+            >>> workout = await client.get_workout("ecfc6a15-4661-442f-a9a4-f160dd7afae8")
+            >>> print(f"{workout.sport_name}: {workout.duration_minutes:.0f}min")
         """
-        if not workout_id or not workout_id.strip():
+        if isinstance(workout_id, uuid.UUID):
+            workout_id = str(workout_id)
+        if isinstance(workout_id, int) or (
+            isinstance(workout_id, str) and workout_id.strip().isdigit()
+        ):
+            raise ValueError(
+                f"Invalid workout_id: {workout_id!r}. WHOOP v2 workout IDs are "
+                "UUID strings; use get_activity_mapping() to look up the UUID "
+                "for a legacy v1 integer ID."
+            )
+        if not isinstance(workout_id, str) or not workout_id.strip():
             raise ValueError(f"Invalid workout_id: {workout_id!r}")
         
         logger.info(
@@ -999,7 +1099,7 @@ class AsyncWhoopClient:
         Failed fetches return None for that key.
 
         Example:
-            async with AsyncWhoopClient(auth) as client:
+            async with AsyncWhoopClient(client_id, client_secret) as client:
                 data = await client.fetch_all(limit=7)
                 print(data["recovery"].records[0].score.recovery_score)
         """
@@ -1052,38 +1152,83 @@ class AsyncWhoopClient:
         return output
 
     # =========================================================================
-    # Access Management
+    # Activity ID Mapping
     # =========================================================================
     
+    async def get_activity_mapping(self, activity_v1_id: int) -> ActivityIdMapping:
+        """
+        Look up the v2 UUID for a legacy v1 sleep or workout ID.
+
+        WHOOP v2 identifies sleeps and workouts by UUID string, while the
+        retired v1 API used integers. Use this to migrate stored v1 IDs.
+
+        Args:
+            activity_v1_id: Legacy v1 integer ID of a sleep or workout.
+
+        Returns:
+            ActivityIdMapping with the activity's v2 UUID (v2_activity_id).
+
+        Raises:
+            WhoopNotFoundError: If no mapping exists for the ID.
+            WhoopAPIError: If request fails.
+            ValueError: If activity_v1_id is invalid.
+
+        Example:
+            >>> mapping = await client.get_activity_mapping(12345678)
+            >>> print(f"v2 ID: {mapping.v2_activity_id}")
+            >>> sleep = await client.get_sleep(mapping.v2_activity_id)
+        """
+        if activity_v1_id <= 0:
+            raise ValueError(f"Invalid activity_v1_id: {activity_v1_id}")
+        
+        logger.info(
+            "Fetching activity ID mapping",
+            extra={"activity_v1_id": activity_v1_id}
+        )
+
+        endpoint = ENDPOINTS["activity_mapping"].format(activity_v1_id=activity_v1_id)
+        data = await self._request("GET", endpoint)
+        return ActivityIdMapping(**data)
+
+    # =========================================================================
+    # Access Management
+    # =========================================================================
+
     async def revoke_access(self) -> None:
         """
-        Revoke current access token.
-        
-        This will invalidate the token and stop webhook delivery.
+        Revoke the user's OAuth access for this application.
+
+        Sends ``DELETE /developer/v2/user/access`` with the current access
+        token. On success this will:
+        - Invalidate the access token granted by the user
+        - Stop webhook delivery for this user if configured
+        - Clear the in-memory tokens, delete the token file at
+          ``auth.token_file`` and clear the response cache, so
+          ``is_authenticated()`` returns False and the next
+          ``authenticate()`` runs the OAuth flow again
+
+        If the request fails, the tokens, token file and cache are kept.
+
+        Raises:
+            WhoopAuthError: If not authenticated or authorization fails.
+            WhoopRateLimitError: If rate limited (429).
+            WhoopAPIError: If the revocation request fails.
+
+        Example:
+            >>> await client.revoke_access()
+            >>> # User must re-authenticate to continue
         """
         logger.info("Revoking access token")
 
-        token = await self.auth.async_get_valid_token()
-        revoke_url = f"{AUTH_BASE_URL}/oauth2/revoke"
-
-        response = await self._http_client.post(
-            revoke_url,
-            data={"token": token},
-            headers={
-                "Content-Type": "application/x-www-form-urlencoded",
-            },
-        )
-
-        if response.status_code != 200:
-            raise WhoopAuthError(
-                f"Token revocation failed with status {response.status_code}: {_sanitize_error_response(response.text)}",
-                status_code=response.status_code,
-            )
+        await self._request("DELETE", ENDPOINTS["user_access"])
 
         self.auth._tokens = None
         self._authenticated = False
-
-        logger.info("Access token revoked")
+        # The revoked tokens would otherwise be reloaded from disk by
+        # has_valid_tokens()/get_valid_token(), and cached responses belong
+        # to the user who just revoked access.
+        delete_tokens(str(self.auth.token_file))
+        self._cache.clear()
 
         logger.info("Access token revoked")
     

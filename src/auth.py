@@ -689,7 +689,7 @@ class OAuthHandler:
         Example:
             >>> token = auth.get_valid_token()
             >>> response = httpx.get(
-            ...     "https://api.prod.whoop.com/developer/v1/recovery",
+            ...     "https://api.prod.whoop.com/developer/v2/recovery",
             ...     headers={"Authorization": f"Bearer {token}"}
             ... )
         """

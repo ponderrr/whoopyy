@@ -5,13 +5,22 @@ The guard only inspects (never writes to) paths, so system locations are checked
 by name. Everything user-side lives under tmp_path with HOME pointed at it.
 """
 
+import csv
 import os
 import sys
 from pathlib import Path
 
 import pytest
 
-from whoopyy.export import _validate_export_path
+from whoopyy.export import (
+    _open_export_file,
+    _validate_export_path,
+    export_cycle_csv,
+    export_recovery_csv,
+    export_sleep_csv,
+    export_workout_csv,
+)
+from whoopyy.models import Cycle, Recovery, Sleep, Workout
 
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="POSIX path rules")
 
@@ -270,5 +279,121 @@ class TestInputTypes:
         _validate_export_path(str(cwd / "a.csv"))
         _validate_export_path(cwd / "a.csv")
 
-    def test_returns_none(self, cwd, home):
-        assert _validate_export_path("a.csv") is None
+
+class TestReturnValue:
+    def test_returns_resolved_path(self, cwd, home):
+        assert _validate_export_path("a.csv") == cwd.resolve() / "a.csv"
+
+    def test_expands_tilde(self, cwd, home):
+        result = _validate_export_path("~/a.csv")
+        assert isinstance(result, Path)
+        assert result == home.resolve() / "a.csv"
+
+    def test_resolves_symlinks_and_dotdot(self, cwd, home):
+        (cwd / "real").mkdir()
+        (cwd / "alias").symlink_to(cwd / "real")
+        assert _validate_export_path("alias/../alias/a.csv") == cwd.resolve() / "real" / "a.csv"
+
+
+@pytest.fixture(params=["recovery", "sleep", "cycle", "workout"])
+def export(
+    request, sample_recovery_dict, sample_sleep_dict, sample_cycle_dict, sample_workout_dict
+):
+    """Each exporter bound to one record: export(path) -> number of rows written."""
+    func, records = {
+        "recovery": (export_recovery_csv, [Recovery.model_validate(sample_recovery_dict)]),
+        "sleep": (export_sleep_csv, [Sleep.model_validate(sample_sleep_dict)]),
+        "cycle": (export_cycle_csv, [Cycle.model_validate(sample_cycle_dict)]),
+        "workout": (export_workout_csv, [Workout.model_validate(sample_workout_dict)]),
+    }[request.param]
+    return lambda path: func(records, path, include_unscored=True)
+
+
+def _rows(path: Path):
+    with open(path, newline="", encoding="utf-8") as f:
+        return list(csv.reader(f))
+
+
+class TestExportersWriteTheValidatedPath:
+    def test_tilde_is_written_under_home(self, export, cwd, home):
+        assert export("~/x.csv") == 1
+        assert len(_rows(home / "x.csv")) == 2  # header + record
+        assert not (cwd / "~").exists()
+
+    def test_tilde_subdirectory(self, export, cwd, home):
+        (home / "exports").mkdir()
+        assert export("~/exports/x.csv") == 1
+        assert (home / "exports" / "x.csv").is_file()
+
+    def test_relative_path_is_written_relative_to_cwd(self, export, cwd, home):
+        assert export("x.csv") == 1
+        assert (cwd / "x.csv").is_file()
+        assert not (home / "x.csv").exists()
+
+    def test_absolute_path_and_path_objects(self, export, tmp_path, home):
+        assert export(tmp_path / "abs.csv") == 1
+        assert export(str(tmp_path / "abs-str.csv")) == 1
+        assert (tmp_path / "abs.csv").is_file() and (tmp_path / "abs-str.csv").is_file()
+
+    def test_existing_file_is_overwritten(self, export, cwd, home):
+        (cwd / "x.csv").write_text("stale\n" * 50)
+        export("x.csv")
+        assert _rows(cwd / "x.csv")[0] != ["stale"]
+
+    def test_symlink_to_regular_file_writes_through(self, export, cwd, home):
+        (cwd / "real.csv").write_text("")
+        (cwd / "link.csv").symlink_to(cwd / "real.csv")
+        assert export("link.csv") == 1
+        assert (cwd / "link.csv").is_symlink()
+        assert len(_rows(cwd / "real.csv")) == 2
+
+    @pytest.mark.parametrize(
+        "path", ["/etc/x.csv", "/private/etc/x.csv", "/Library/x.csv", "~/.ssh/authorized_keys",
+                 "~/.zshrc", "/usr/x.csv"],
+    )
+    def test_protected_destinations_still_raise_before_writing(self, export, path, cwd, home):
+        with pytest.raises(ValueError, match="protected"):
+            export(path)
+        assert not (home / ".ssh").exists()
+        assert not (home / ".zshrc").exists()
+
+    def test_directory_destination_still_raises(self, export, cwd, home):
+        (home / "out").mkdir()
+        with pytest.raises(ValueError, match="non-regular"):
+            export("~/out")
+
+
+class TestOpenExportFile:
+    def test_writes_utf8_without_newline_translation(self, tmp_path):
+        with _open_export_file(tmp_path / "a.csv") as f:
+            f.write("caf\u00e9\r\n")
+        assert (tmp_path / "a.csv").read_bytes() == "caf\u00e9\r\n".encode("utf-8")
+
+    def test_truncates_existing_file(self, tmp_path):
+        (tmp_path / "a.csv").write_text("x" * 100)
+        with _open_export_file(tmp_path / "a.csv") as f:
+            f.write("y")
+        assert (tmp_path / "a.csv").read_text() == "y"
+
+    def test_new_file_mode_follows_umask_like_open(self, tmp_path):
+        old = os.umask(0o022)
+        try:
+            with _open_export_file(tmp_path / "a.csv"):
+                pass
+        finally:
+            os.umask(old)
+        assert (tmp_path / "a.csv").stat().st_mode & 0o777 == 0o644
+
+    def test_missing_parent_raises_file_not_found(self, tmp_path):
+        with pytest.raises(FileNotFoundError):
+            _open_export_file(tmp_path / "missing" / "a.csv")
+
+    @pytest.mark.skipif(not hasattr(os, "O_NOFOLLOW"), reason="needs O_NOFOLLOW")
+    def test_refuses_symlink_swapped_in_after_validation(self, tmp_path):
+        target = tmp_path / "victim.txt"
+        target.write_text("keep me")
+        link = tmp_path / "a.csv"
+        link.symlink_to(target)
+        with pytest.raises(OSError):
+            _open_export_file(link)
+        assert target.read_text() == "keep me"

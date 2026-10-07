@@ -32,6 +32,7 @@ Example:
 """
 
 import csv
+import os
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -87,7 +88,7 @@ def _is_within(path: tuple[str, ...], root: Union[str, Path]) -> bool:
     return path[: len(root_parts)] == root_parts
 
 
-def _validate_export_path(filepath: Union[str, Path]) -> None:
+def _validate_export_path(filepath: Union[str, Path]) -> Path:
     """Validate that an export destination is safe to write to.
 
     The path is expanded (``~``) and fully resolved (symlinks, ``..``) before
@@ -99,6 +100,10 @@ def _validate_export_path(filepath: Union[str, Path]) -> None:
 
     Only the current user's home is checked; ``/usr/local`` and the macOS
     per-user temp directory remain writable.
+
+    Returns the resolved path. Callers must write to it rather than to the
+    argument, since only the resolved path is what was validated (``~`` is
+    never expanded by ``open()``).
     """
     try:
         resolved = Path(filepath).expanduser().resolve()
@@ -122,6 +127,24 @@ def _validate_export_path(filepath: Union[str, Path]) -> None:
 
     if resolved.exists() and not resolved.is_file():
         raise ValueError(f"Cannot overwrite non-regular file: {resolved}")
+
+    return resolved
+
+
+def _open_export_file(path: Path) -> TextIO:
+    """Open a validated export path for text writing, refusing a symlink as the final component.
+
+    Equivalent to ``open(path, "w", newline="", encoding="utf-8")``, except that
+    where ``O_NOFOLLOW`` exists a symlink swapped in after validation raises
+    ``OSError`` instead of being followed. Parent directories are not covered.
+    """
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open(path, flags, 0o666)
+    try:
+        return os.fdopen(fd, "w", newline="", encoding="utf-8")
+    except Exception:
+        os.close(fd)
+        raise
 
 
 __all__ = [
@@ -257,7 +280,7 @@ def export_recovery_csv(
         >>> count = export_recovery_csv(recoveries, "recovery.csv")
         >>> print(f"Exported {count} records")
     """
-    _validate_export_path(filepath)
+    filepath = _validate_export_path(filepath)
 
     if not recoveries:
         logger.warning("No recovery records to export")
@@ -277,7 +300,7 @@ def export_recovery_csv(
         extra={"filepath": str(filepath), "record_count": len(records)}
     )
     
-    with open(filepath, "w", newline="", encoding="utf-8") as f:
+    with _open_export_file(filepath) as f:
         writer = csv.writer(f)
         
         # Header row
@@ -352,7 +375,7 @@ def export_sleep_csv(
         >>> sleeps = client.get_all_sleep(max_records=30)
         >>> count = export_sleep_csv(sleeps, "sleep.csv", include_naps=False)
     """
-    _validate_export_path(filepath)
+    filepath = _validate_export_path(filepath)
 
     if not sleeps:
         logger.warning("No sleep records to export")
@@ -376,7 +399,7 @@ def export_sleep_csv(
         extra={"filepath": str(filepath), "record_count": len(records)}
     )
     
-    with open(filepath, "w", newline="", encoding="utf-8") as f:
+    with _open_export_file(filepath) as f:
         writer = csv.writer(f)
         
         # Header row
@@ -461,7 +484,7 @@ def export_cycle_csv(
     Returns:
         Number of records exported.
     """
-    _validate_export_path(filepath)
+    filepath = _validate_export_path(filepath)
 
     if not cycles:
         logger.warning("No cycle records to export")
@@ -480,7 +503,7 @@ def export_cycle_csv(
         extra={"filepath": str(filepath), "record_count": len(records)}
     )
     
-    with open(filepath, "w", newline="", encoding="utf-8") as f:
+    with _open_export_file(filepath) as f:
         writer = csv.writer(f)
         
         # Header row
@@ -548,7 +571,7 @@ def export_workout_csv(
         >>> workouts = client.get_all_workouts(max_records=100)
         >>> count = export_workout_csv(workouts, "workouts.csv")
     """
-    _validate_export_path(filepath)
+    filepath = _validate_export_path(filepath)
 
     if not workouts:
         logger.warning("No workout records to export")
@@ -567,7 +590,7 @@ def export_workout_csv(
         extra={"filepath": str(filepath), "record_count": len(records)}
     )
     
-    with open(filepath, "w", newline="", encoding="utf-8") as f:
+    with _open_export_file(filepath) as f:
         writer = csv.writer(f)
         
         # Header row

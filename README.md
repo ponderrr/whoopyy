@@ -5,22 +5,22 @@
 ```
  ██╗    ██╗██╗  ██╗ ██████╗  ██████╗ ██████╗ ██╗   ██╗██╗   ██╗
  ██║    ██║██║  ██║██╔═══██╗██╔═══██╗██╔══██╗╚██╗ ██╔╝╚██╗ ██╔╝
- ██║ █╗ ██║███████║██║   ██║██║   ██║██████╔╝ ╚████╔╝  ╚████╔╝
- ██║███╗██║██╔══██║██║   ██║██║   ██║██╔═══╝   ╚██╔╝    ╚██╔╝
- ╚███╔███╔╝██║  ██║╚██████╔╝╚██████╔╝██║        ██║      ██║
-  ╚══╝╚══╝ ╚═╝  ╚═╝ ╚═════╝  ╚═════╝ ╚═╝        ╚═╝      ╚═╝
+ ██║ █╗ ██║███████║██║   ██║██║   ██║██████╔╝ ╚████╔╝  ╚████╔╝ 
+ ██║███╗██║██╔══██║██║   ██║██║   ██║██╔═══╝   ╚██╔╝    ╚██╔╝  
+ ╚███╔███╔╝██║  ██║╚██████╔╝╚██████╔╝██║        ██║      ██║   
+  ╚══╝╚══╝ ╚═╝  ╚═╝ ╚═════╝  ╚═════╝ ╚═╝        ╚═╝      ╚═╝   
 ```
 
 **The complete, type-safe Python SDK for the WHOOP API**
 
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-1a1a2e?style=for-the-badge&logo=python&logoColor=e94560)](https://www.python.org)
 [![Pydantic v2](https://img.shields.io/badge/pydantic-v2-1a1a2e?style=for-the-badge&logo=pydantic&logoColor=e94560)](https://docs.pydantic.dev)
-[![Async Ready](https://img.shields.io/badge/async-ready-1a1a2e?style=for-the-badge&logo=fastapi&logoColor=e94560)](https://docs.python.org/3/library/asyncio.html)
-[![Typed](https://img.shields.io/badge/mypy-strict-1a1a2e?style=for-the-badge&logo=mypy&logoColor=e94560)](http://mypy-lang.org)
+[![Async Ready](https://img.shields.io/badge/async-ready-1a1a2e?style=for-the-badge&logo=python&logoColor=e94560)](https://docs.python.org/3/library/asyncio.html)
+[![Typed](https://img.shields.io/badge/mypy-strict-1a1a2e?style=for-the-badge&logo=python&logoColor=e94560)](https://mypy-lang.org)
 
 <br>
 
-*Recovery scores. Sleep stages. Strain data. Workouts.*
+*Recovery scores. Sleep stages. Strain data. Workouts.*<br>
 *All type-safe, all auto-paginated, all with zero token headaches.*
 
 <br>
@@ -47,6 +47,8 @@ with WhoopClient(client_id="...", client_secret="...") as client:
   Mar 11   71.8%  HRV 55ms  [green]
   Mar 10   28.1%  HRV 22ms  [red]
 ```
+
+<sub>whoopyy also writes INFO log lines to stderr by default; set `WHOOPYY_LOG_LEVEL=WARNING` to see only the output above.</sub>
 
 ---
 
@@ -82,7 +84,7 @@ cd whoopyy && pip install -e .
 
 > **Requirements:** Python 3.9+ &mdash; only two dependencies: [`httpx`](https://www.python-httpx.org/) and [`pydantic`](https://docs.pydantic.dev/) v2
 
-> **Upgrading from 0.2.x / 0.3.x?** WHOOP has retired its v1 API, and versions 0.2.0&ndash;0.3.1 send their data calls to v1 paths. 0.4.0 targets the **WHOOP Developer API v2**. It has breaking changes (`zone_duration` &rarr; `zone_durations`, `sport_id` may be `None`, `revoke_access()` now calls `DELETE /v2/user/access`). See the [CHANGELOG](CHANGELOG.md#040---2026-10-06) for the migration notes.
+> **Upgrading from 0.2.x / 0.3.x (installed from GitHub)?** WHOOP has retired its v1 API, and versions 0.2.0&ndash;0.3.1 send their data calls to v1 paths. 0.4.0 targets the **WHOOP Developer API v2**. It has breaking changes (`zone_duration` &rarr; `zone_durations`, `sport_id` may be `None`, `revoke_access()` now calls `DELETE /developer/v2/user/access`). See the [CHANGELOG](https://github.com/ponderrr/whoopyy/blob/main/CHANGELOG.md#040---2026-10-06) for the migration notes.
 
 ---
 
@@ -112,10 +114,15 @@ print(f"Hello, {profile.first_name} {profile.last_name}")
 
 ## Architecture
 
+> The diagrams in this README are Mermaid. They render on [GitHub](https://github.com/ponderrr/whoopyy#architecture); PyPI shows their source.
+
+`WhoopClient` and `AsyncWhoopClient` are independent of each other. Each has its own `OAuthHandler`, which keeps the tokens in the token file and refreshes them, and its own HTTP client for `api.prod.whoop.com`. Responses are parsed into Pydantic models.
+
 ```mermaid
 graph LR
     subgraph Your Code
-        A[WhoopClient] --> B[AsyncWhoopClient]
+        A[WhoopClient]
+        B[AsyncWhoopClient]
     end
 
     subgraph WhoopYY SDK
@@ -182,7 +189,8 @@ flowchart TD
 
     D --> E{Response}
     E -->|200 OK| F[Parse → Pydantic Model]
-    E -->|401| G[Refresh unless already refreshed<br>+ Retry once]
+    E -->|401, first attempt| G[Refresh unless another caller already did<br>+ Retry once]
+    E -->|401 on retry| N[WhoopAuthError]
     E -->|404| H[WhoopNotFoundError]
     E -->|429| I[Wait X-RateLimit-Reset<br>max 120s, retry once]
     E -->|429 on retry| L[WhoopRateLimitError<br>with retry_after]
@@ -262,7 +270,7 @@ The SDK handles the complete OAuth 2.0 lifecycle automatically:
 - **Proactive token refresh** before expiry (60s buffer)
 - **One refresh at a time** — WHOOP rotates the refresh token on every refresh, so a used refresh token never works again. Each refresh holds an in-process lock (`threading.RLock` for sync code, an `asyncio.Lock` per event loop for async code) and then a cross-process lock on `<token_file>.lock`, and re-reads the token file first. Threads, coroutines, clients and processes that share a token file therefore refresh once and reuse the result
 - **Automatic 401 retry** — refreshes the token (unless another thread, coroutine or process has already replaced the rejected one) and replays the failed request once
-- **5xx retry on refresh** — exponential backoff on transient token server errors. Callers that were waiting for a refresh that fails get its error instead of repeating it
+- **5xx retry on refresh** — exponential backoff on transient token server errors. Threads and coroutines of the same client that were waiting for a refresh that fails get its error instead of repeating it (other clients and processes sharing the token file try the refresh themselves)
 - **Dead refresh token handling** — if WHOOP rejects the stored refresh token (`invalid_grant` or `token_inactive`), the SDK re-reads the token file in case another process rotated it. If it did not, the SDK clears the in-memory tokens, deletes the token file and raises `WhoopTokenError` ("WHOOP authorization has ended..."). Calls waiting for that refresh, and later calls, get the same error, and the next `authenticate()` opens the browser again. If the token file cannot be deleted, the message says so and the handler ignores the file's contents
 - **Secure storage** — the token file is written atomically (temp file, fsync, rename) with mode `0600`, even if it already existed with looser permissions. A symlink at the token path is refused
 - **No lost refresh tokens** — before a refresh token or an authorization code is sent, the SDK checks that the token file can be written (and is not a symlink). If it cannot, `WhoopTokenError` (or `WhoopAuthError` from `authenticate()`) is raised and nothing is sent, so the stored refresh token stays valid. An async refresh runs in its own task, so cancelling the request that started it (`asyncio.wait_for`, a client disconnect) does not lose the rotated token
@@ -302,7 +310,7 @@ In async code, use `AsyncWhoopClient`. If synchronous token code runs on the eve
 client.revoke_access()   # DELETE /developer/v2/user/access (204 No Content)
 ```
 
-`revoke_access()` uses WHOOP's documented revocation endpoint with the current Bearer token. It goes through the normal request path, so failures raise the usual exceptions (`WhoopValidationError`, `WhoopAuthError`, `WhoopRateLimitError`, `WhoopAPIError`). If the app receives webhooks, WHOOP stops sending them for this user. On success the client signs out: it clears its in-memory tokens, deletes the token file at `client.auth.token_file` and clears its response cache. `is_authenticated()` then returns `False`, and the next `authenticate()` runs the OAuth flow again. If the request fails, the tokens, token file and cache are left as they were, unless the refresh token turns out to be dead while retrying a 401: then the tokens are cleared and the token file is deleted as described under dead refresh token handling above (the cache is kept).
+`revoke_access()` uses WHOOP's documented revocation endpoint with the current Bearer token. It goes through the normal request path, so failures raise the usual exceptions (`WhoopValidationError`, `WhoopAuthError`, `WhoopRateLimitError`, `WhoopAPIError`, `WhoopNetworkError`). If the app receives webhooks, WHOOP stops sending them for this user. On success the client signs out: it clears its in-memory tokens, deletes the token file at `client.auth.token_file` and clears its response cache. `is_authenticated()` then returns `False`, and the next `authenticate()` runs the OAuth flow again. If the request fails, the client does not sign out: the token file and cache are kept, although a token refresh made on the way (for an expired access token or after a 401) is still saved. The exception is a refresh that finds the refresh token dead: then the tokens are cleared and the token file is deleted as described under dead refresh token handling above (the cache is kept).
 
 ---
 
@@ -362,7 +370,7 @@ for w in workouts.records:
     if w.score:
         print(f"{w.sport_display_name}: {w.duration_minutes:.0f}min | "
               f"Strain: {w.score.strain:.1f} | "
-              f"Calories: {w.score.kilojoule:.0f}kJ")
+              f"Calories: {w.score.calories:.0f}kcal")
         zones = w.score.zone_durations  # HR zone breakdown (formerly zone_duration)
         if zones:
             print(f"  Zone 4+5: {zones.zone_four_minutes + zones.zone_five_minutes:.0f}min")
@@ -383,10 +391,10 @@ print(f"Max HR: {body.max_heart_rate}bpm")
 ### Date Filtering
 
 ```python
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 # Last 30 days
-end = datetime.now()
+end = datetime.now(timezone.utc)
 start = end - timedelta(days=30)
 data = client.get_recovery_collection(start=start, end=end)
 
@@ -443,7 +451,7 @@ flowchart LR
 
 ## Async Client
 
-Drop-in replacement for concurrent data fetching:
+Same methods as `WhoopClient`, but each data call is a coroutine you `await` (and `iter_*` are async generators for `async for`), so requests can run concurrently:
 
 ```python
 import asyncio
@@ -488,7 +496,7 @@ classDiagram
         +datetime created_at
         +Literal score_state
         +RecoveryScore? score
-        +is_scored() bool
+        +bool is_scored
     }
 
     class RecoveryScore {
@@ -498,7 +506,7 @@ classDiagram
         +float? spo2_percentage
         +float? skin_temp_celsius
         +bool user_calibrating
-        +recovery_zone() str
+        +str recovery_zone
     }
 
     class Sleep {
@@ -507,7 +515,7 @@ classDiagram
         +bool nap
         +Literal score_state
         +SleepScore? score
-        +duration_hours() float
+        +float duration_hours
     }
 
     class SleepScore {
@@ -516,7 +524,7 @@ classDiagram
         +float? respiratory_rate
         +float? sleep_performance_percentage
         +float? sleep_efficiency_percentage
-        +total_sleep_duration_hours() float
+        +float total_sleep_duration_hours
     }
 
     class Cycle {
@@ -533,7 +541,7 @@ classDiagram
         +int average_heart_rate
         +int max_heart_rate
         +float kilojoule
-        +strain_level() str
+        +str strain_level
     }
 
     class Workout {
@@ -542,8 +550,8 @@ classDiagram
         +int? sport_id
         +Literal score_state
         +WorkoutScore? score
-        +sport_display_name() str
-        +duration_minutes() float
+        +str sport_display_name
+        +float duration_minutes
     }
 
     class WorkoutScore {
@@ -593,7 +601,7 @@ Every entity uses a `Literal` type for scoring status:
 |:------|:---------|:--------|
 | `RecoveryScore` | `.recovery_zone` | `"green"` / `"yellow"` / `"red"` |
 | `CycleScore` | `.strain_level` | `"Light"` / `"Moderate"` / `"Strenuous"` / `"All Out"` |
-| `Sleep` | `.duration_hours` | Total sleep duration as `float` |
+| `Sleep` | `.duration_hours` | Hours from `start` to `end` (time in bed, awake time included) as `float`; actual sleep time is `.score.total_sleep_duration_hours` |
 | `Workout` | `.sport_display_name` | `sport_name` as WHOOP sends it, e.g. `"running"` (falls back to the deprecated `sport_id`) |
 | `Workout` | `.duration_minutes` | Workout duration as `float` |
 | `UserProfileBasic` | `.full_name` | `"First Last"` |
@@ -621,6 +629,9 @@ export_sleep_csv(sleeps, "sleep_q1.csv")
 
 cycles = client.get_all_cycles(max_records=90)
 export_cycle_csv(cycles, "cycles_q1.csv")   # last column: Step Count
+
+workouts = client.get_all_workouts(max_records=90)
+export_workout_csv(workouts, "workouts_q1.csv")
 ```
 
 ### Trend Analysis
@@ -640,8 +651,8 @@ print(f"Avg Duration:  {sleep_trends.average_duration_hours:.1f}h")
 
 # Training load
 load = analyze_training_load(cycles, workouts)
-print(f"Weekly Strain:  {load.total_strain:.1f}")
-if load.average_daily_steps is not None:      # None when no cycle has step data
+print(f"Total Strain:   {load.total_strain:.1f}")
+if load.average_daily_steps is not None:      # None when no scored cycle has step data
     print(f"Avg Steps:      {load.average_daily_steps:,.0f}")
 
 # Full report
@@ -654,6 +665,8 @@ generate_summary_report(recoveries, sleeps, cycles, workouts, output="report.txt
 ## Error Handling
 
 ### Exception Hierarchy
+
+Every exception derives from `WhoopError`. `WhoopTokenError` is a `WhoopAuthError`, and `WhoopNotFoundError` and `WhoopValidationError` are `WhoopAPIError`s. `WhoopRateLimitError` and `WhoopNetworkError` derive from `WhoopError` directly.
 
 ```mermaid
 graph TD
@@ -687,7 +700,10 @@ graph TD
 | `WhoopAPIError` | Other HTTP errors | 5xx yes, 4xx no |
 
 ```python
+import time
+
 from whoopyy.exceptions import (
+    WhoopError,
     WhoopRateLimitError,
     WhoopAuthError,
     WhoopNetworkError,
@@ -720,17 +736,17 @@ The SDK handles common failure modes automatically:
 | Scenario | SDK Behavior |
 |:---------|:-------------|
 | Token expires mid-request | Refreshes token + retries the request once |
-| Several requests get a 401 at once (threads, `asyncio.gather()`, or processes sharing the token file) | One refresh fires; the others reuse the new token. If that refresh fails, the requests of the same process that waited for it get its error instead of trying again |
+| Several requests get a 401 at once (threads, `asyncio.gather()`, or processes sharing the token file) | One refresh fires; the others reuse the new token. If that refresh fails, the requests of the same client that waited for it get its error instead of trying again |
 | Rate limited (429) | Waits `X-RateLimit-Reset` seconds (falls back to `Retry-After`, then 60s; capped at 120s), retries once, then raises `WhoopRateLimitError` |
 | `X-RateLimit-Remaining` drops to 5 or less | Logs a warning |
-| Two threads or processes refresh simultaneously | The in-process lock and the token file lock let only one refresh fire at a time; a caller that waited for a failed refresh in the same process gets its error |
+| Two threads or processes refresh simultaneously | The in-process lock and the token file lock let only one refresh fire at a time; a caller that waited for a failed refresh of the same client gets its error |
 | Refresh token revoked, expired or already used | Re-reads the token file in case another process rotated it; otherwise clears the tokens and raises `WhoopTokenError`, and `authenticate()` opens the browser again |
 | Another thread or process saves tokens during a read | Saves are atomic, so a reader sees the old or the new file, never a partial one. A read that fails while the file is changing is retried |
-| Token server returns 503 | Retries up to 3x with exponential backoff (one caller retries; callers waiting for it share the outcome) |
+| Token server returns 503 | Retries up to 3x with exponential backoff (one caller retries; callers of the same client waiting for it share the outcome) |
 | Request cancelled while its async refresh is in flight | The refresh finishes in its own task and saves the rotated tokens |
 | Token file is a symlink or cannot be written | `WhoopTokenError` before the refresh token is sent, so it stays valid |
 | User never completes OAuth | Callback server times out after 120s |
-| Stray or forged request to the callback server | Answered with 404 (other path) or 400 (wrong `state`) and ignored; the flow keeps waiting |
+| Stray or forged request to the callback server | Answered with 404 (other path), 400 (wrong `state`) or 501 (method other than GET) and ignored; the flow keeps waiting |
 
 ---
 
@@ -739,9 +755,9 @@ The SDK handles common failure modes automatically:
 | Concern | How WhoopYY handles it |
 |:--------|:-----------------------|
 | Token storage | `~/.whoop_tokens.json`, rewritten atomically on every save with mode `0600` (owner-only), even if the file already existed with looser permissions. A failed save leaves the previous file intact (unless the directory is not writable or the file is a mount point, where it is rewritten in place), and a symlink at the token path is refused before any token is sent |
-| Token refresh | One refresh at a time across threads, coroutines and processes (in-process lock plus `<token_file>.lock`), so two callers never spend the same rotating refresh token |
+| Token refresh | One refresh at a time across threads, coroutines and processes (in-process lock plus `<token_file>.lock`), so two callers never spend the same rotating refresh token. If the lock file cannot be created (e.g. a read-only token directory), cross-process locking is skipped with a warning |
 | CSRF protection | Cryptographic `state` parameter on every OAuth flow, compared in constant time before the callback's code or error is used |
-| OAuth callback | Loopback hosts only; requests to other paths or with a wrong `state` are ignored; echoed text is HTML-escaped; responses send `nosniff`, `no-store`, `X-Frame-Options: DENY` and `no-referrer` headers |
+| OAuth callback | Loopback hosts only; requests to other paths or with a wrong `state` are ignored; echoed text is HTML-escaped; GET responses send `nosniff`, `no-store`, `X-Frame-Options: DENY` and `no-referrer` headers (other methods get the standard library's plain 501 and are ignored) |
 | PKCE | Opt-in S256 with `use_pkce=True` |
 | Error messages | Response text in exceptions and logs is redacted, then cut to 200 characters. JWTs, `access_token` / `refresh_token` / `id_token` / `client_secret` values and Ory `ory_at_` / `ory_rt_` tokens become `[REDACTED]`. Redaction is pattern-based, so treat error text as sensitive anyway |
 | Secrets in code | Tokens never logged; pass credentials via env vars |
@@ -783,12 +799,13 @@ pytest tests/test_auth.py -v                       # specific module
 mypy src/ --ignore-missing-imports
 
 # Build
+pip install build
 python -m build
 ```
 
 ### Live Check Against Your Own Account
 
-`scripts/live_check.py` is a one-shot, read-only check of the SDK against your real WHOOP data. It signs in through your own developer app in your browser, calls every read endpoint once (GET only; it never calls `revoke_access()`), and validates each raw response against its whoopyy model.
+[`scripts/live_check.py`](https://github.com/ponderrr/whoopyy/blob/main/scripts/live_check.py) is a one-shot, read-only check of the SDK against your real WHOOP data. It signs in through your own developer app in your browser, calls every read endpoint once (GET only; it never calls `revoke_access()`), and validates each raw response against its whoopyy model.
 
 ```bash
 pip install -e .                               # from this checkout, so the check runs against this code
@@ -799,12 +816,12 @@ python scripts/live_check.py --days 14        # also: --out DIR, --port 8080, --
 
 Your WHOOP app must have `http://localhost:8080/callback` registered as a redirect URL (or set `WHOOP_REDIRECT_URI` to the `http://localhost:<port>/...` URL it has). With no credentials set, the script prints how to create the app.
 
-It prints a per-endpoint table (records, ok/fail, dropped fields, notes) and exits `0` only if every endpoint was called and validated. `get_workout` and `get_activity_mapping` may be skipped when the window has no workout or no legacy `v1_id`; the cycle, recovery and sleep endpoints may not, so an empty window fails (try a larger `--days`). It exits `1` on any failure, including a failed sign-in, and `2` if it could not run. Output goes to `~/Projects/whoop-research/live-check-<timestamp>/` by default and is refused inside any git working tree:
+It prints a per-endpoint table (records, ok/fail, dropped fields, notes) and exits `0` only if every endpoint was called and validated. `get_workout` and `get_activity_mapping` may be skipped when the window has no workout or no legacy `v1_id`; the cycle, recovery and sleep endpoints may not, so an empty window fails (try a larger `--days`). It exits `1` on any failure, including a failed sign-in, `2` if it could not run, and `130`/`143`/`129` when stopped by Ctrl-C, SIGTERM or SIGHUP. Output goes to `~/Projects/whoop-research/live-check-<timestamp>/` by default and is refused inside any git working tree:
 
 - `shape_report.json`: field names, JSON types (and any that differ from the model's declared type), null counts, undeclared (dropped) fields, `next_token` behaviour and rate-limit headers. No values from your account, so it is safe to share.
 - `raw/`: the raw responses (files `0600`, directory `0700`). This is your personal health data; do not share or commit it.
 
-Tokens go to a temporary file (never `~/.whoop_tokens.json`) that is deleted at exit, including on Ctrl-C, SIGTERM or SIGHUP, unless you pass `--keep-token`.
+Tokens go to a temporary file (never `~/.whoop_tokens.json`) that is deleted at exit, including on Ctrl-C, SIGTERM or SIGHUP, unless you pass `--keep-token`. With `--token-file PATH` the script uses that file instead and leaves it in place (mode `0600`).
 
 ### Project Structure
 
@@ -821,9 +838,11 @@ whoopyy/
 │   ├── export.py            # CSV export + trend analysis
 │   ├── utils.py             # Token I/O, datetime helpers
 │   ├── logger.py            # Structured logging config
-│   └── type_defs.py         # TypedDict definitions
+│   ├── type_defs.py         # TypedDict definitions
+│   └── py.typed             # PEP 561 marker (ships in sdist and wheel)
 ├── tests/                   # 1,000+ tests, ~96% coverage
 ├── examples/                # Usage examples
+├── scripts/                 # live_check.py (read-only live API check), perf_check.py
 ├── setup.py
 └── pyproject.toml
 ```
@@ -832,7 +851,7 @@ whoopyy/
 
 ## License
 
-GPL-3.0-only. See [LICENSE](LICENSE).
+GPL-3.0-only. See [LICENSE](https://github.com/ponderrr/whoopyy/blob/main/LICENSE).
 
 ---
 

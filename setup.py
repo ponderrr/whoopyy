@@ -9,7 +9,7 @@ setup(
     name="strapkit",
     version="0.4.0",
     author="Andrew Ponder",
-    author_email="raponder.business@gmail.com",
+    author_email="andrew@andrewponder.me",
     description="Unofficial, type-safe Python SDK for the WHOOP Developer API (not affiliated with WHOOP, Inc.)",
     long_description=long_description,
     long_description_content_type="text/markdown",

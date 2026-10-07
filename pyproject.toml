@@ -7,7 +7,7 @@ requires-python = ">=3.9"
 license = "GPL-3.0-only"
 license-files = ["LICENSE"]
 authors = [
-    { name = "Andrew Ponder", email = "raponder.business@gmail.com" }
+    { name = "Andrew Ponder", email = "andrew@andrewponder.me" }
 ]
 keywords = ["whoop", "fitness", "health", "api", "sdk", "oauth", "wearable", "biometrics", "hrv", "recovery"]
 classifiers = [

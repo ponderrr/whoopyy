@@ -65,6 +65,7 @@ WHOOP's v2 OpenAPI spec. Everyone on 0.2.0–0.3.1 should upgrade.
 - `authenticate()` clears the response cache after a completed browser flow
 - The OAuth callback server is bound before the browser opens, so a busy port or a non-loopback redirect URI raises `WhoopAuthError` without opening the browser. Each flow keeps its result on its own server object
 - For a `localhost` redirect URI the callback server listens on both `127.0.0.1` and `::1` (where the machine has IPv6). A port on which another program already accepts connections on one of the loopback addresses raises `WhoopAuthError` (see Security)
+- Maintainer contact email updated.
 
 ### Deprecated
 - `WHOOPYY_LOG_LEVEL` environment variable — use `STRAPKIT_LOG_LEVEL`. The old name is still read, but only when `STRAPKIT_LOG_LEVEL` is unset or empty

@@ -12,7 +12,7 @@ As of 2026-10-07:
 
 | | |
 |---|---|
-| Version in source | `0.4.0` in `pyproject.toml`, `setup.py` and `src/__init__.py` on branch `release/0.4.0`. **Not released.** `main` (`2555601`) still holds the 0.3.1 code. `release/0.4.0` has not been pushed (the remote has only `main`), so there is no release PR yet |
+| Version in source | `0.4.0` in `pyproject.toml`, `setup.py` and `src/__init__.py` on branch `release/0.4.0`. **Not released.** `main` (`2555601`) still holds the 0.3.1 code. `release/0.4.0` is pushed, and the release PR is https://github.com/ponderrr/whoopyy/pull/1 |
 | PyPI / TestPyPI | `strapkit` does not exist on either index (both JSON APIs return 404, checked 2026-10-07). Nothing has been uploaded |
 | GitHub releases | `v0.2.0`, `v0.3.0` and `v0.3.1` (marked Latest). All three send data calls to WHOOP's retired `/developer/v1` API |
 | Publish workflow | Has never run. It was added in `2555601`, after `v0.3.1` was tagged |
@@ -68,8 +68,8 @@ to TestPyPI before PyPI.
 
 | Site | Account |
 |---|---|
-| https://pypi.org | `ponderrr` (raponder.business@gmail.com) |
-| https://test.pypi.org | `pondertest` (raponder.business@gmail.com) |
+| https://pypi.org | `ponderrr` (andrew@andrewponder.me) |
+| https://test.pypi.org | `pondertest` (andrew@andrewponder.me) |
 
 On each site:
 
@@ -170,8 +170,8 @@ six checks:
 - `Type check, version, package`, from the `checks` job
 
 GitHub lists a check in the picker only after it has run in the repository recently. These
-names come from the new `ci.yml` on `release/0.4.0`, so open the release PR
-([section 2](#2-pre-release-checklist)) first. Then go to **Settings → Branches → Add classic
+names come from the new `ci.yml` on `release/0.4.0`, so the release PR
+([#1](https://github.com/ponderrr/whoopyy/pull/1)) has to have run them first. Then go to **Settings → Branches → Add classic
 branch protection rule**, enter the branch name pattern `main`, tick **Require status checks to
 pass before merging**, add the six checks, and save. From a terminal:
 
@@ -199,13 +199,9 @@ runs.
 
 ## 2. Pre-release checklist
 
-Open the release PR if it doesn't exist yet:
+The release PR is https://github.com/ponderrr/whoopyy/pull/1. Watch its checks with:
 
 ```bash
-git push -u origin release/0.4.0
-gh pr create --repo ponderrr/whoopyy --base main --head release/0.4.0 \
-  --title "Release 0.4.0: back to the WHOOP v2 API" \
-  --body "See CHANGELOG.md, section 0.4.0."
 gh pr checks release/0.4.0 --repo ponderrr/whoopyy --watch
 ```
 

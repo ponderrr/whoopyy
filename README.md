@@ -153,18 +153,19 @@ sequenceDiagram
     App->>SDK: client.authenticate()
     SDK->>SDK: Check cached tokens
 
-    alt Tokens valid
+    alt Access token valid
         SDK-->>App: Ready (no browser needed)
-    else Tokens expired
-        SDK->>SDK: Refresh via refresh_token
-        SDK-->>App: Ready (silent refresh)
-    else No tokens
-        SDK->>Browser: Open authorization URL
+    else Access token expired, refresh token stored
+        SDK-->>App: Ready (refreshed silently on the first API call)
+    else No usable tokens, or authenticate(force=True)
+        SDK->>SDK: Start callback server on localhost
+        SDK->>Browser: Open authorization URL (state, optional PKCE)
         Browser->>Whoop: User grants consent
-        Whoop->>SDK: Callback with auth code
+        Whoop->>SDK: Callback with auth code and state
+        SDK->>SDK: Verify state
         SDK->>Whoop: Exchange code for tokens
         Whoop-->>SDK: access_token + refresh_token
-        SDK->>SDK: Cache tokens (chmod 600)
+        SDK->>SDK: Save tokens atomically (mode 0600)
         SDK-->>App: Ready
     end
 ```
@@ -175,12 +176,13 @@ sequenceDiagram
 flowchart TD
     A[API Call] --> B{Token expired?}
     B -->|No| D[Send Request]
-    B -->|Yes| C[Refresh Token<br>with mutex lock]
+    B -->|Yes| C[Refresh Token<br>under in-process + token file lock]
     C --> D
+    C -->|refresh token rejected| M[Tokens cleared<br>WhoopTokenError]
 
     D --> E{Response}
     E -->|200 OK| F[Parse → Pydantic Model]
-    E -->|401| G[Refresh + Retry once]
+    E -->|401| G[Refresh unless already refreshed<br>+ Retry once]
     E -->|404| H[WhoopNotFoundError]
     E -->|429| I[Wait X-RateLimit-Reset<br>max 120s, retry once]
     E -->|429 on retry| L[WhoopRateLimitError<br>with retry_after]
@@ -239,26 +241,60 @@ Paths are relative to `https://api.prod.whoop.com`. Sleep and workout IDs are UU
 ## Authentication
 
 ```python
+import os
+
 client = WhoopClient(
     client_id="...",
     client_secret="...",
-    redirect_uri="http://localhost:8080/callback",  # default
-    token_file="~/.whoop_tokens.json",              # default, absolute path
-    timeout=30.0,                                    # request timeout in seconds
+    redirect_uri="http://localhost:8080/callback",          # default
+    token_file=os.path.expanduser("~/.whoop_tokens.json"),  # default; pass a full path, "~" is not expanded
+    timeout=30.0,                                           # seconds, for API and token requests (API connect capped at 5s)
+    use_pkce=False,                                         # default; True adds a PKCE (S256) challenge
 )
 
 client.authenticate()
 # First run: opens browser for OAuth consent
-# Subsequent runs: loads cached tokens, refreshes if expired
+# Subsequent runs: uses the cached tokens; an expired access token is refreshed on the first API call
 ```
 
 The SDK handles the complete OAuth 2.0 lifecycle automatically:
-- **CSRF protection** via cryptographic `state` parameter
+- **CSRF protection** via a cryptographic `state` parameter, checked before the callback's code or error is used
 - **Proactive token refresh** before expiry (60s buffer)
-- **Thread-safe refresh** with `threading.Lock` (sync) and `asyncio.Lock` (async)
-- **Automatic 401 retry** — refreshes token and replays the failed request once
-- **5xx retry on refresh** — exponential backoff on transient token server errors
-- **Secure storage** — token file created with `chmod 600`
+- **One refresh at a time** — WHOOP rotates the refresh token on every refresh, so a used refresh token never works again. Each refresh holds an in-process lock (`threading.RLock` for sync code, an `asyncio.Lock` per event loop for async code) and then a cross-process lock on `<token_file>.lock`, and re-reads the token file first. Threads, coroutines, clients and processes that share a token file therefore refresh once and reuse the result
+- **Automatic 401 retry** — refreshes the token (unless another thread, coroutine or process has already replaced the rejected one) and replays the failed request once
+- **5xx retry on refresh** — exponential backoff on transient token server errors. Callers that were waiting for a refresh that fails get its error instead of repeating it
+- **Dead refresh token handling** — if WHOOP rejects the stored refresh token (`invalid_grant` or `token_inactive`), the SDK re-reads the token file in case another process rotated it. If it did not, the SDK clears the in-memory tokens, deletes the token file and raises `WhoopTokenError` ("WHOOP authorization has ended..."). Calls waiting for that refresh, and later calls, get the same error, and the next `authenticate()` opens the browser again. If the token file cannot be deleted, the message says so and the handler ignores the file's contents
+- **Secure storage** — the token file is written atomically (temp file, fsync, rename) with mode `0600`, even if it already existed with looser permissions. A symlink at the token path is refused
+- **No lost refresh tokens** — before a refresh token or an authorization code is sent, the SDK checks that the token file can be written (and is not a symlink). If it cannot, `WhoopTokenError` (or `WhoopAuthError` from `authenticate()`) is raised and nothing is sent, so the stored refresh token stays valid. An async refresh runs in its own task, so cancelling the request that started it (`asyncio.wait_for`, a client disconnect) does not lose the rotated token
+
+### Re-authenticating and Signing Out
+
+```python
+client.authenticate(force=True)   # run the browser flow even though tokens are stored
+client.logout()                   # forget the tokens locally; WHOOP is not contacted
+```
+
+`authenticate()` skips the browser while usable tokens are stored: an unexpired access token, or a refresh token. Use `force=True` to sign in again anyway, for example to switch accounts or grant new scopes. A completed browser flow also clears the response cache.
+
+`logout()` clears the in-memory tokens, deletes the token file and clears the response cache. `is_authenticated()` then returns `False`, and the next `authenticate()` runs the OAuth flow again. The grant stays valid on WHOOP's side; use `revoke_access()` to revoke it. On `AsyncWhoopClient`, `logout()` is a coroutine (`await client.logout()`).
+
+### PKCE (opt-in)
+
+`use_pkce=True` (on `WhoopClient`, `AsyncWhoopClient` or `OAuthHandler`) sends an S256 `code_challenge` in the authorization URL and the matching `code_verifier` with the code exchange, alongside the client secret. A new verifier is generated for every flow. It is off by default until it has been verified against WHOOP's OAuth server.
+
+### The Callback Server
+
+`authorize()` starts a local HTTP server on the redirect URI's port before it opens the browser. The redirect host must be `localhost`, `127.0.0.1` or `[::1]`. For `127.0.0.1` and `[::1]` the server listens on that address. For `localhost` it listens on both `127.0.0.1` and `::1` (where the machine has IPv6), because browsers may resolve `localhost` to either. If another program already accepts connections on one of those addresses and the port (for example a dev server on `[::]:8080`), `WhoopAuthError` is raised before the browser opens, so that program cannot receive the authorization code. A `http://127.0.0.1:PORT/...` redirect URI (RFC 8252, section 8.3) avoids the `localhost` ambiguity altogether.
+
+The server only accepts a request to the redirect URI's path that carries the expected `state`. Other paths get a 404 and a wrong or missing `state` gets a 400, and in both cases the server keeps waiting. Text echoed into the page is HTML-escaped. The flow gives up after 120 seconds. Each connection has a 10-second read timeout and is closed after 10 seconds at most, at most 16 are open at once (a new one closes the oldest), and all are closed when the flow ends, so idle or trickling connections cannot hold up the flow or leave threads behind.
+
+### Sharing a Token File
+
+Any number of threads, `WhoopClient`/`AsyncWhoopClient` instances and processes can use the same token file. The SDK creates a lock file `<token_file>.lock` (mode `0600`) next to it and never deletes it, not even on `logout()`. Locking uses `fcntl.flock` on POSIX and `msvcrt.locking` on Windows.
+
+The token file's directory should be writable by the process. If it is not, but the token file itself is, the SDK rewrites the file in place (not atomically, with a warning) and runs without the cross-process lock, because the lock file cannot be created there (also logged as a warning). The same in-place rewrite is used when the token file is a mount point, such as a Docker single-file bind mount. If neither the directory nor the file is writable, refreshing raises `WhoopTokenError` before the refresh token is sent.
+
+In async code, use `AsyncWhoopClient`. If synchronous token code runs on the event loop's thread while an async refresh on the same token file is in progress there, it raises `RuntimeError` instead of deadlocking, and `authenticate()` raises `WhoopAuthError` before opening the browser. Call `authenticate()` before starting async work, or in a worker thread (`await asyncio.to_thread(client.authenticate)`).
 
 ### Revoking Access
 
@@ -266,7 +302,7 @@ The SDK handles the complete OAuth 2.0 lifecycle automatically:
 client.revoke_access()   # DELETE /developer/v2/user/access (204 No Content)
 ```
 
-`revoke_access()` uses WHOOP's documented revocation endpoint with the current Bearer token. It goes through the normal request path, so failures raise the usual exceptions (`WhoopValidationError`, `WhoopAuthError`, `WhoopRateLimitError`, `WhoopAPIError`). If the app receives webhooks, WHOOP stops sending them for this user. On success the client signs out: it clears its in-memory tokens, deletes the token file at `client.auth.token_file` and clears its response cache. `is_authenticated()` then returns `False`, and the next `authenticate()` runs the OAuth flow again. If the request fails, the tokens, token file and cache are left as they were.
+`revoke_access()` uses WHOOP's documented revocation endpoint with the current Bearer token. It goes through the normal request path, so failures raise the usual exceptions (`WhoopValidationError`, `WhoopAuthError`, `WhoopRateLimitError`, `WhoopAPIError`). If the app receives webhooks, WHOOP stops sending them for this user. On success the client signs out: it clears its in-memory tokens, deletes the token file at `client.auth.token_file` and clears its response cache. `is_authenticated()` then returns `False`, and the next `authenticate()` runs the OAuth flow again. If the request fails, the tokens, token file and cache are left as they were, unless the refresh token turns out to be dead while retrying a 401: then the tokens are cleared and the token file is deleted as described under dead refresh token handling above (the cache is kept).
 
 ---
 
@@ -433,7 +469,9 @@ async def build_dashboard():
 asyncio.run(build_dashboard())
 ```
 
-The async client uses non-blocking token refresh (`asyncio.Lock` + `httpx.AsyncClient`) so concurrent requests never block the event loop.
+The async client refreshes tokens without blocking the event loop, both before expiry and after a 401. It waits for an `asyncio.Lock`, then for the token file lock by polling with `asyncio.sleep`, and refreshes with `httpx.AsyncClient`. Backoff also uses `asyncio.sleep`. When several requests in one `asyncio.gather()` get a 401, the token is refreshed once. The `asyncio.Lock` is created inside the running event loop on first use (and again if the loop changes), so an `AsyncWhoopClient` can be created before any loop is running, also on Python 3.9. Reading and writing the small token file is still ordinary synchronous file I/O.
+
+`authenticate()` is synchronous because it may open a browser and wait for the callback. `logout()`, `revoke_access()` and `close()` are coroutines.
 
 ---
 
@@ -641,7 +679,7 @@ graph TD
 | Exception | When | Retryable? |
 |:----------|:-----|:----------:|
 | `WhoopAuthError` | OAuth failure, invalid credentials | No — re-authenticate |
-| `WhoopTokenError` | Token refresh failure | No — re-authenticate |
+| `WhoopTokenError` | No tokens, or token refresh failure. A rejected refresh token also clears the stored tokens ("WHOOP authorization has ended") | No — re-authenticate |
 | `WhoopNotFoundError` | Resource not found (404) | No |
 | `WhoopValidationError` | Bad request params (400) | No — fix request |
 | `WhoopRateLimitError` | Still rate limited (429) after the automatic retry | Yes — use `.retry_after` |
@@ -663,7 +701,7 @@ except WhoopRateLimitError as e:
     time.sleep(e.retry_after)  # respect the rate limit
 
 except WhoopAuthError:
-    client.authenticate()  # full re-auth
+    client.authenticate(force=True)  # full re-auth in the browser
 
 except WhoopNetworkError:
     retry_with_backoff()  # transient failure
@@ -682,11 +720,17 @@ The SDK handles common failure modes automatically:
 | Scenario | SDK Behavior |
 |:---------|:-------------|
 | Token expires mid-request | Refreshes token + retries the request once |
+| Several requests get a 401 at once (threads, `asyncio.gather()`, or processes sharing the token file) | One refresh fires; the others reuse the new token. If that refresh fails, the requests of the same process that waited for it get its error instead of trying again |
 | Rate limited (429) | Waits `X-RateLimit-Reset` seconds (falls back to `Retry-After`, then 60s; capped at 120s), retries once, then raises `WhoopRateLimitError` |
 | `X-RateLimit-Remaining` drops to 5 or less | Logs a warning |
-| Two threads refresh simultaneously | Mutex ensures only one refresh fires |
-| Token server returns 503 | Retries up to 3x with exponential backoff |
+| Two threads or processes refresh simultaneously | The in-process lock and the token file lock let only one refresh fire at a time; a caller that waited for a failed refresh in the same process gets its error |
+| Refresh token revoked, expired or already used | Re-reads the token file in case another process rotated it; otherwise clears the tokens and raises `WhoopTokenError`, and `authenticate()` opens the browser again |
+| Another thread or process saves tokens during a read | Saves are atomic, so a reader sees the old or the new file, never a partial one. A read that fails while the file is changing is retried |
+| Token server returns 503 | Retries up to 3x with exponential backoff (one caller retries; callers waiting for it share the outcome) |
+| Request cancelled while its async refresh is in flight | The refresh finishes in its own task and saves the rotated tokens |
+| Token file is a symlink or cannot be written | `WhoopTokenError` before the refresh token is sent, so it stays valid |
 | User never completes OAuth | Callback server times out after 120s |
+| Stray or forged request to the callback server | Answered with 404 (other path) or 400 (wrong `state`) and ignored; the flow keeps waiting |
 
 ---
 
@@ -694,9 +738,12 @@ The SDK handles common failure modes automatically:
 
 | Concern | How WhoopYY handles it |
 |:--------|:-----------------------|
-| Token storage | `~/.whoop_tokens.json` with `chmod 600` (owner-only) |
-| CSRF protection | Cryptographic `state` parameter on every OAuth flow |
-| Token refresh | Thread-safe with locking, prevents double-refresh corruption |
+| Token storage | `~/.whoop_tokens.json`, rewritten atomically on every save with mode `0600` (owner-only), even if the file already existed with looser permissions. A failed save leaves the previous file intact (unless the directory is not writable or the file is a mount point, where it is rewritten in place), and a symlink at the token path is refused before any token is sent |
+| Token refresh | One refresh at a time across threads, coroutines and processes (in-process lock plus `<token_file>.lock`), so two callers never spend the same rotating refresh token |
+| CSRF protection | Cryptographic `state` parameter on every OAuth flow, compared in constant time before the callback's code or error is used |
+| OAuth callback | Loopback hosts only; requests to other paths or with a wrong `state` are ignored; echoed text is HTML-escaped; responses send `nosniff`, `no-store`, `X-Frame-Options: DENY` and `no-referrer` headers |
+| PKCE | Opt-in S256 with `use_pkce=True` |
+| Error messages | Response text in exceptions and logs is redacted, then cut to 200 characters. JWTs, `access_token` / `refresh_token` / `id_token` / `client_secret` values and Ory `ory_at_` / `ory_rt_` tokens become `[REDACTED]`. Redaction is pattern-based, so treat error text as sensitive anyway |
 | Secrets in code | Tokens never logged; pass credentials via env vars |
 
 ```bash
@@ -715,7 +762,7 @@ client = WhoopClient(
 )
 ```
 
-> **Do not** commit `~/.whoop_tokens.json` to version control. The SDK stores access and refresh tokens as plaintext JSON.
+> **Do not** commit `~/.whoop_tokens.json` (or its `.lock` file) to version control. The SDK stores access and refresh tokens as plaintext JSON.
 
 ---
 

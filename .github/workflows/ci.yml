@@ -6,15 +6,35 @@ on:
     branches: [main]
 jobs:
   test:
+    name: Tests (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: pip install -e ".[dev]"
+      - run: pytest --tb=short -q --cov=whoopyy --cov-report=term --cov-fail-under=90
+
+  checks:
+    name: Type check, version, package
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
-      - run: pip install -e ".[dev]"
-      - run: pytest --tb=short -q
-      - run: mypy src/ --ignore-missing-imports
+          python-version: "3.12"
+      - run: pip install -e ".[dev]" build twine
+      - run: mypy src/ --strict --ignore-missing-imports
+      - name: Build and verify distributions
+        run: |
+          python -m build
+          twine check dist/*
+          python -m zipfile -l dist/*.whl | grep -q "whoopyy/py.typed"
       - name: Check version consistency
         run: |
           python - <<'PY'

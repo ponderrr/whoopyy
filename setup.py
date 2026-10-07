@@ -16,6 +16,7 @@ setup(
     url="https://github.com/ponderrr/whoopyy",
     package_dir={"whoopyy": "src"},
     packages=["whoopyy"],
+    package_data={"whoopyy": ["py.typed"]},
     classifiers=[
         "Development Status :: 4 - Beta",
         "Intended Audience :: Developers",

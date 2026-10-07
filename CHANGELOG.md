@@ -49,6 +49,8 @@ WHOOP's v2 OpenAPI spec. Everyone on 0.2.0–0.3.1 should upgrade.
 
 ### Fixed
 - Data calls reach WHOOP's supported v2 API again
+- Ship a PEP 561 `py.typed` marker in the sdist and wheel, so downstream type checkers use whoopyy's annotations instead of treating the package as untyped
+- README license section said "Proprietary — All Rights Reserved"; it now matches the LICENSE file and package metadata (GPL-3.0-only)
 - Docstring examples: `cycle.score.strain` (was the nonexistent `cycle.score.score`), UUID sleep/workout IDs, v2 paths
 - Duplicate "Access token revoked" log line in `AsyncWhoopClient.revoke_access()`
 - `revoke_access()` now signs the client out fully: on success it deletes the token file at `auth.token_file` and clears the response cache, as well as clearing the in-memory tokens. Previously `is_authenticated()` stayed `True`, `authenticate()` reused the revoked token from disk, and cached profile data was still served

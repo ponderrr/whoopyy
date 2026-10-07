@@ -765,7 +765,7 @@ whoopyy/
 
 ## License
 
-Proprietary &mdash; All Rights Reserved. See [LICENSE](LICENSE).
+GPL-3.0-only. See [LICENSE](LICENSE).
 
 ---
 

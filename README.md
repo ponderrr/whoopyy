@@ -739,6 +739,26 @@ mypy src/ --ignore-missing-imports
 python -m build
 ```
 
+### Live Check Against Your Own Account
+
+`scripts/live_check.py` is a one-shot, read-only check of the SDK against your real WHOOP data. It signs in through your own developer app in your browser, calls every read endpoint once (GET only; it never calls `revoke_access()`), and validates each raw response against its whoopyy model.
+
+```bash
+pip install -e .                               # from this checkout, so the check runs against this code
+export WHOOP_CLIENT_ID="your_id"
+export WHOOP_CLIENT_SECRET="your_secret"
+python scripts/live_check.py --days 14        # also: --out DIR, --port 8080, --token-file PATH, --keep-token
+```
+
+Your WHOOP app must have `http://localhost:8080/callback` registered as a redirect URL (or set `WHOOP_REDIRECT_URI` to the `http://localhost:<port>/...` URL it has). With no credentials set, the script prints how to create the app.
+
+It prints a per-endpoint table (records, ok/fail, dropped fields, notes) and exits `0` only if every endpoint was called and validated. `get_workout` and `get_activity_mapping` may be skipped when the window has no workout or no legacy `v1_id`; the cycle, recovery and sleep endpoints may not, so an empty window fails (try a larger `--days`). It exits `1` on any failure, including a failed sign-in, and `2` if it could not run. Output goes to `~/Projects/whoop-research/live-check-<timestamp>/` by default and is refused inside any git working tree:
+
+- `shape_report.json`: field names, JSON types (and any that differ from the model's declared type), null counts, undeclared (dropped) fields, `next_token` behaviour and rate-limit headers. No values from your account, so it is safe to share.
+- `raw/`: the raw responses (files `0600`, directory `0700`). This is your personal health data; do not share or commit it.
+
+Tokens go to a temporary file (never `~/.whoop_tokens.json`) that is deleted at exit, including on Ctrl-C, SIGTERM or SIGHUP, unless you pass `--keep-token`.
+
 ### Project Structure
 
 ```

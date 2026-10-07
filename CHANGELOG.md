@@ -29,6 +29,7 @@ WHOOP's v2 OpenAPI spec. Everyone on 0.2.0–0.3.1 should upgrade.
 - `Cycle.step_count` (`Optional[int]`); `None` when WHOOP has no step data for the cycle
 - `Sleep.v1_id` and `Workout.v1_id` (`Optional[int]`, deprecated by WHOOP)
 - `utils.parse_rate_limit_reset(headers, default=60)` — seconds to wait after a 429
+- `format_sport_name(sport_name)` — display label for a v2 `sport_name`, exported from `whoopyy`
 - `TrainingLoadTrends.average_daily_steps` (mean over scored cycles that report steps); `generate_summary_report()` adds an "Average Daily Steps" line when step data exists
 - `ENDPOINTS` keys `user_access`, `sleep_for_cycle` and `activity_mapping`
 - `type_defs`: `RecoveryResponse`, `SleepResponse`, `SleepNeededResponse`, `CycleResponse`, `WorkoutResponse`, `ZoneDurationsResponse`, `ActivityIdMappingResponse`
@@ -43,7 +44,7 @@ WHOOP's v2 OpenAPI spec. Everyone on 0.2.0–0.3.1 should upgrade.
 ### Changed
 - 429 handling reads `X-RateLimit-Reset` (WHOOP's documented header) first, then `Retry-After`, then falls back to 60s. The wait is still capped at 120s with one automatic retry, and `WhoopRateLimitError.retry_after` carries the parsed value
 - Date-only strings (`"YYYY-MM-DD"`) passed as `start`/`end` become `"YYYY-MM-DDT00:00:00.000Z"`, because v2 rejects date-only values. `datetime`/`date` objects and other strings are unchanged
-- `Workout.sport_display_name` returns `sport_name` exactly as WHOOP sends it (lowercase, e.g. `"running"`, `"hiit"`), falls back to the deprecated `sport_id` lookup in `SPORT_NAMES`, and returns `"Unknown"` when neither is set. In 0.3.x it returned the `SPORT_NAMES` label (e.g. `"Running"`, `"HIIT"`)
+- `Workout.sport_display_name` formats WHOOP's v2 `sport_name` (lowercase, e.g. `"hiit"`) with the new `format_sport_name()`: the curated `SPORT_NAMES` label when the name matches one ignoring case, spaces, hyphens and underscores (`"hiit"` → `"HIIT"`, `"functional-fitness"` → `"Functional Fitness"`), otherwise each word capitalized. It falls back to the deprecated `sport_id` lookup and returns `"Unknown"` when neither is set. Use `sport_name` for the raw value
 - `export_workout_csv()` leaves the `Sport ID` cell empty when WHOOP omits `sport_id` (column order unchanged)
 - `type_defs` required/optional keys now match the v2 spec; `WorkoutScoreResponse` uses `zone_durations`
 - Collection `end` filters are documented as exclusive, per the spec
@@ -111,7 +112,7 @@ WHOOP's v2 OpenAPI spec. Everyone on 0.2.0–0.3.1 should upgrade.
 ### Migration from 0.3.x
 - `score.zone_duration` → `score.zone_durations` (the old name still works, with a `DeprecationWarning`)
 - Treat `workout.sport_id` as optional; use `workout.sport_name` or `workout.sport_display_name` instead
-- `workout.sport_display_name` now returns WHOOP's lowercase `sport_name` (`"running"`, `"hiit"`) instead of the `SPORT_NAMES` label (`"Running"`, `"HIIT"`); format it yourself if you display it
+- `workout.sport_display_name` still returns readable labels (`"Running"`, `"HIIT"`), now derived from `sport_name`; a sport missing from `SPORT_NAMES` gets capitalized words (`"non-sleep-deep-rest"` → `"Non Sleep Deep Rest"`)
 - Code that builds `Workout` objects directly (tests, fixtures) must pass `sport_name`
 - Stored v1 integer sleep/workout IDs: convert with `client.get_activity_mapping(v1_id).v2_activity_id`
 - `revoke_access()`: catch `WhoopError` (or the specific subclasses above) rather than only `WhoopAuthError`. On success it now also deletes the token file at `client.auth.token_file`, so code that expected the file to survive a revoke must re-run `authenticate()`

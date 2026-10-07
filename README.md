@@ -602,7 +602,7 @@ Every entity uses a `Literal` type for scoring status:
 | `RecoveryScore` | `.recovery_zone` | `"green"` / `"yellow"` / `"red"` |
 | `CycleScore` | `.strain_level` | `"Light"` / `"Moderate"` / `"Strenuous"` / `"All Out"` |
 | `Sleep` | `.duration_hours` | Hours from `start` to `end` (time in bed, awake time included) as `float`; actual sleep time is `.score.total_sleep_duration_hours` |
-| `Workout` | `.sport_display_name` | `sport_name` as WHOOP sends it, e.g. `"running"` (falls back to the deprecated `sport_id`) |
+| `Workout` | `.sport_display_name` | Readable label for `sport_name`, e.g. `"hiit"` → `"HIIT"` (falls back to the deprecated `sport_id`; `.sport_name` keeps the raw value) |
 | `Workout` | `.duration_minutes` | Workout duration as `float` |
 | `UserProfileBasic` | `.full_name` | `"First Last"` |
 | `BodyMeasurement` | `.height_feet` / `.weight_pounds` | Imperial conversions |

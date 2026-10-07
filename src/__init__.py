@@ -59,6 +59,7 @@ from .models import (
     # Helpers
     format_duration,
     get_sport_name,
+    format_sport_name,
     SPORT_NAMES,
 )
 
@@ -135,6 +136,7 @@ __all__ = [
     # Helpers
     "format_duration",
     "get_sport_name",
+    "format_sport_name",
     "SPORT_NAMES",
     # Export utilities - Data classes
     "RecoveryTrends",

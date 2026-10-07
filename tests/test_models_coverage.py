@@ -257,20 +257,38 @@ class TestWorkoutProperties:
         )
 
     def test_sport_display_name_from_sport_name(self) -> None:
-        """A non-empty sport_name is returned unchanged."""
+        """A v2 sport_name is shown with its curated SPORT_NAMES label."""
         w = self._make_workout(sport_name="mountain_biking")
-        assert w.sport_display_name == "mountain_biking"
+        assert w.sport_display_name == "Mountain Biking"
+        assert w.sport_name == "mountain_biking"  # raw value untouched
 
-    @pytest.mark.parametrize("name", ["hiit", "mma", "non-sleep-deep-rest"])
-    def test_sport_display_name_keeps_v2_sport_name_as_is(self, name) -> None:
-        """Real v2 names are not reformatted (no 'Hiit' / 'Mma')."""
+    @pytest.mark.parametrize(
+        "name,expected",
+        [
+            ("hiit", "HIIT"),
+            ("HIIT", "HIIT"),
+            ("functional-fitness", "Functional Fitness"),
+            ("track_and_field", "Track And Field"),
+            ("operations-tactical", "Operations - Tactical"),
+            ("non-sleep-deep-rest", "Non Sleep Deep Rest"),
+            ("running", "Running"),
+            ("  weightlifting ", "Weightlifting"),
+        ],
+    )
+    def test_sport_display_name_formats_v2_names(self, name, expected) -> None:
+        """Known names use the curated label; others get capitalized words."""
         w = self._make_workout(sport_name=name, sport_id=96)
-        assert w.sport_display_name == name
+        assert w.sport_display_name == expected
 
     def test_sport_display_name_prefers_sport_name_over_sport_id(self) -> None:
         """sport_name (v2) wins over the deprecated sport_id."""
         w = self._make_workout(sport_name="running", sport_id=44)
-        assert w.sport_display_name == "running"
+        assert w.sport_display_name == "Running"
+
+    def test_sport_display_name_blank_sport_name_uses_id(self) -> None:
+        """A whitespace-only sport_name falls back to the deprecated sport_id."""
+        w = self._make_workout(sport_name="   ", sport_id=44)
+        assert w.sport_display_name == "Yoga"
 
     def test_sport_display_name_from_id(self) -> None:
         """With an empty sport_name, the deprecated sport_id is looked up."""

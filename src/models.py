@@ -48,6 +48,7 @@ Example:
     Recovery: 75.5%
 """
 
+import re
 import warnings
 from datetime import datetime
 from typing import Optional, Dict, List, Literal
@@ -1111,6 +1112,45 @@ SPORT_NAMES: Dict[int, str] = {
 }
 
 
+def _sport_key(name: str) -> str:
+    """Normalize a sport name for lookup: lowercase letters and digits only."""
+    return re.sub(r"[^a-z0-9]", "", name.lower())
+
+
+_SPORT_LABELS_BY_KEY: Dict[str, str] = {
+    _sport_key(label): label for label in SPORT_NAMES.values()
+}
+"""SPORT_NAMES labels keyed by normalized name ("hiit" -> "HIIT")."""
+
+
+def format_sport_name(sport_name: str) -> str:
+    """
+    Turn a WHOOP v2 ``sport_name`` into a display label.
+
+    Uses the curated SPORT_NAMES label when the name matches one ignoring
+    case, spaces, hyphens and underscores ("hiit" -> "HIIT",
+    "functional-fitness" -> "Functional Fitness"). Otherwise capitalizes
+    each word, treating hyphens and underscores as spaces.
+
+    Args:
+        sport_name: Sport name as sent by WHOOP (e.g. "running").
+
+    Returns:
+        Human-readable sport label.
+
+    Example:
+        >>> format_sport_name("hiit")
+        'HIIT'
+        >>> format_sport_name("non-sleep-deep-rest")
+        'Non Sleep Deep Rest'
+    """
+    label = _SPORT_LABELS_BY_KEY.get(_sport_key(sport_name))
+    if label is not None:
+        return label
+    words = re.split(r"[\s_\-]+", sport_name.strip())
+    return " ".join(word[:1].upper() + word[1:] for word in words if word)
+
+
 class Workout(BaseModel):
     """
     Complete workout activity record (v2 ``WorkoutV2`` schema).
@@ -1171,15 +1211,16 @@ class Workout(BaseModel):
         """
         Get human-readable sport name.
 
-        Returns ``sport_name`` unchanged when it is non-empty (WHOOP v2
-        sends lowercase names such as "running" or "hiit"). Otherwise falls
-        back to looking up the deprecated ``sport_id`` in SPORT_NAMES.
+        Formats ``sport_name`` (WHOOP v2 sends lowercase names such as
+        "running" or "hiit") with :func:`format_sport_name`, so "hiit"
+        becomes "HIIT". Use ``sport_name`` for the raw value. Falls back to
+        looking up the deprecated ``sport_id`` in SPORT_NAMES.
 
         Returns:
             Display name of the sport, or "Unknown" if neither field is set.
         """
-        if self.sport_name:
-            return self.sport_name
+        if self.sport_name and self.sport_name.strip():
+            return format_sport_name(self.sport_name)
         if self.sport_id is not None:
             return get_sport_name(self.sport_id)
         return "Unknown"

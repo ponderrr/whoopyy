@@ -29,6 +29,17 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+      - name: Check release tag matches package version
+        run: |
+          python - <<'PY'
+          import os, re, sys
+          text = open("pyproject.toml", encoding="utf-8").read()
+          version = re.search(r'^version\s*=\s*"([^"]+)"', text, re.MULTILINE).group(1)
+          tag = os.environ["GITHUB_REF_NAME"]
+          if tag != f"v{version}":
+              sys.exit(f"ERROR: release tag {tag} does not match package version v{version}")
+          print(f"Tag {tag} matches package version {version}")
+          PY
       - name: Install build backend
         run: pip install --upgrade build twine
       - name: Build wheel and sdist
@@ -62,6 +73,7 @@ jobs:
         with:
           repository-url: https://test.pypi.org/legacy/
           print-hash: true
+          skip-existing: true
 
   verify-testpypi:
     name: Verify TestPyPI install
@@ -71,14 +83,20 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Wait for TestPyPI propagation
-        run: sleep 30
-      - name: Install from TestPyPI
+      - name: Install the released version from TestPyPI
         run: |
-          pip install \
-            --index-url https://test.pypi.org/simple/ \
-            --extra-index-url https://pypi.org/simple/ \
-            whoopyy
+          VERSION="${GITHUB_REF_NAME#v}"
+          for attempt in 1 2 3 4 5 6 7 8 9 10; do
+            if pip install --no-cache-dir \
+                --index-url https://test.pypi.org/simple/ \
+                --extra-index-url https://pypi.org/simple/ \
+                "whoopyy==$VERSION"; then
+              exit 0
+            fi
+            echo "whoopyy==$VERSION not installable yet (attempt $attempt); retrying in 30s"
+            sleep 30
+          done
+          exit 1
       - name: Verify import
         run: |
           python -c "
@@ -118,10 +136,17 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Wait for PyPI propagation
-        run: sleep 60
-      - name: Install from PyPI
-        run: pip install whoopyy
+      - name: Install the released version from PyPI
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          for attempt in 1 2 3 4 5 6 7 8 9 10; do
+            if pip install --no-cache-dir "whoopyy==$VERSION"; then
+              exit 0
+            fi
+            echo "whoopyy==$VERSION not installable yet (attempt $attempt); retrying in 30s"
+            sleep 30
+          done
+          exit 1
       - name: Verify import and version
         run: |
           python -c "

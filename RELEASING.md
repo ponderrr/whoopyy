@@ -35,11 +35,11 @@ before you tag.
 | Job id | Shown as | Needs | Environment | What it does |
 |---|---|---|---|---|
 | `test` | Run test suite | | | Python 3.11: `pip install -e ".[dev]"`, `pytest --tb=short -q`, `mypy src/ --ignore-missing-imports` |
-| `build` | Build distribution | `test` | | `python -m build`, `twine check dist/*`, then uploads artifact `dist` (kept 7 days) |
-| `publish-testpypi` | Publish to TestPyPI | `build` | `testpypi` | `pypa/gh-action-pypi-publish@release/v1` to `https://test.pypi.org/legacy/`. `permissions: id-token: write` |
-| `verify-testpypi` | Verify TestPyPI install | `publish-testpypi` | | Waits 30 s, then `pip install whoopyy` from TestPyPI (dependencies from PyPI) and imports the clients, models and exceptions |
+| `build` | Build distribution | `test` | | Fails unless the release tag equals `v` + the `pyproject.toml` version, then `python -m build`, `twine check dist/*`, and uploads artifact `dist` (kept 7 days) |
+| `publish-testpypi` | Publish to TestPyPI | `build` | `testpypi` | `pypa/gh-action-pypi-publish@release/v1` to `https://test.pypi.org/legacy/` with `skip-existing: true`. `permissions: id-token: write` |
+| `verify-testpypi` | Verify TestPyPI install | `publish-testpypi` | | `pip install whoopyy==<tag version>` from TestPyPI (dependencies from PyPI), retrying every 30 s up to 10 times, then imports the clients, models and exceptions |
 | `publish-pypi` | Publish to PyPI | `verify-testpypi` | `pypi` | `pypa/gh-action-pypi-publish@release/v1` to PyPI. `permissions: id-token: write` |
-| `verify-pypi` | Verify PyPI install | `publish-pypi` | | Waits 60 s, then `pip install whoopyy` and imports the clients |
+| `verify-pypi` | Verify PyPI install | `publish-pypi` | | `pip install whoopyy==<tag version>`, retrying every 30 s up to 10 times, then imports the clients |
 
 PyPI and GitHub must agree on these values:
 
@@ -244,7 +244,7 @@ gh pr checks release/0.4.0 --repo ponderrr/whoopyy --watch
   `description` in `pyproject.toml`, which PyPI shows as the summary. If you rename, change all
   of these before you tag:
   - `name` in `pyproject.toml` and `setup.py`.
-  - `pip install whoopyy` in `publish.yml`. `verify-testpypi` and `verify-pypi` install by
+  - `whoopyy==$VERSION` in `publish.yml`. `verify-testpypi` and `verify-pypi` install by
     name, so they break if this isn't changed. Also change the two `environment.url` values.
   - **PyPI Project Name** on both pending publishers.
   - The install instructions in `README.md`.
@@ -501,18 +501,18 @@ See also https://docs.pypi.org/trusted-publishers/troubleshooting/.
 
 ### 5.4 `verify-testpypi` can't find the package
 
-`ERROR: No matching distribution found for whoopyy` means TestPyPI's index hadn't updated by the
-end of the 30-second wait. Re-run failed jobs. `verify-pypi` waits 60 seconds and can fail the
-same way.
+`ERROR: No matching distribution found for whoopyy==0.4.0` on every one of the 10 attempts
+(about 5 minutes) means TestPyPI's index still hadn't updated. Re-run failed jobs. `verify-pypi`
+retries the same way and can fail the same way.
 
 ### 5.5 Re-running a failed publish
 
 Use **Re-run failed jobs** in the run's page, or
 `gh run rerun "$RUN_ID" --repo ponderrr/whoopyy --failed`. Once `publish-testpypi` has
 succeeded, **never** use **Re-run all jobs**. A full re-run builds again and uploads to TestPyPI
-again. The rebuilt files aren't byte-identical to the ones already there, so that upload fails
-with `400 File already exists` (`publish.yml` doesn't set `skip-existing`), and `publish-pypi`
-never runs. A re-run uses the same commit and `publish.yml` as the original run. Jobs in an
+again. The rebuilt files aren't byte-identical to the ones already there. `publish-testpypi`
+sets `skip-existing: true`, so it skips them instead of failing, but `publish-pypi` would then
+upload the *rebuilt* files, which differ from what you verified on TestPyPI. A re-run uses the same commit and `publish.yml` as the original run. Jobs in an
 environment need approval again, and the `dist` artifact is kept for only 7 days.
 
 | Failed job | Already uploaded | What to do |

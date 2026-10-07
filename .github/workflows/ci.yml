@@ -17,28 +17,30 @@ jobs:
       - run: mypy src/ --ignore-missing-imports
       - name: Check version consistency
         run: |
-          python -c "
+          python - <<'PY'
           import re
+          import sys
 
-          with open('src/__init__.py') as f:
-              content = f.read()
-          init_version = re.search(r'__version__\s*=\s*[\"'"'"'](.*?)[\"'"'"']', content).group(1)
+          # (file, variable name) pairs that must all carry the same version.
+          SOURCES = [
+              ("pyproject.toml", "version"),
+              ("setup.py", "version"),
+              ("src/__init__.py", "__version__"),
+          ]
 
-          with open('pyproject.toml') as f:
-              content = f.read()
-          toml_version = re.search(r'version\s*=\s*[\"'"'"'](.*?)[\"'"'"']', content).group(1)
+          def read_version(path, key):
+              with open(path, encoding="utf-8") as f:
+                  text = f.read()
+              match = re.search(rf"^\s*{key}\s*=\s*[\"']([^\"']+)[\"']", text, re.MULTILINE)
+              if match is None:
+                  sys.exit(f"ERROR: no `{key} = ...` found in {path}")
+              return match.group(1)
 
-          with open('setup.py') as f:
-              content = f.read()
-          setup_version = re.search(r'version\s*=\s*[\"'"'"'](.*?)[\"'"'"']', content).group(1)
+          versions = {path: read_version(path, key) for path, key in SOURCES}
+          for path, version in versions.items():
+              print(f"{path:<16} {version}")
 
-          print(f'__init__.py:    {init_version}')
-          print(f'pyproject.toml: {toml_version}')
-          print(f'setup.py:       {setup_version}')
-
-          assert init_version == toml_version == setup_version, (
-              f'Version mismatch: __init__.py={init_version}, '
-              f'pyproject.toml={toml_version}, setup.py={setup_version}'
-          )
-          print('Version consistency: OK')
-          "
+          if len(set(versions.values())) != 1:
+              sys.exit("ERROR: version mismatch across files")
+          print("Version consistency: OK")
+          PY

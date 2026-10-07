@@ -1,5 +1,5 @@
 """
-Targeted tests for whoopyy.export to boost branch coverage.
+Targeted tests for strapkit.export to boost branch coverage.
 
 Covers: empty/unscored record paths, report with empty data, file output.
 """
@@ -11,14 +11,14 @@ from pathlib import Path
 
 import pytest
 
-from whoopyy.export import (
+from strapkit.export import (
     export_cycle_csv,
     export_recovery_csv,
     export_sleep_csv,
     export_workout_csv,
     generate_summary_report,
 )
-from whoopyy.models import (
+from strapkit.models import (
     Cycle,
     CycleScore,
     Recovery,

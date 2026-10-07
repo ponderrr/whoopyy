@@ -19,10 +19,10 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from whoopyy import AsyncWhoopClient, WhoopClient
-from whoopyy.auth import OAuthHandler
-from whoopyy.exceptions import WhoopNotFoundError
-from whoopyy.models import (
+from strapkit import AsyncWhoopClient, WhoopClient
+from strapkit.auth import OAuthHandler
+from strapkit.exceptions import WhoopNotFoundError
+from strapkit.models import (
     ActivityIdMapping,
     BodyMeasurement,
     Cycle,
@@ -379,7 +379,7 @@ class TestExport:
     """Tests for CSV export with real data."""
 
     def test_export_cycle_csv_with_real_data(self, client, tmp_path):
-        from whoopyy.export import export_cycle_csv
+        from strapkit.export import export_cycle_csv
         cycles = client.get_all_cycles()
         if not cycles:
             pytest.skip("No cycle data available")
@@ -390,7 +390,7 @@ class TestExport:
         assert len(content) > 0
 
     def test_export_sleep_csv_with_real_data(self, client, tmp_path):
-        from whoopyy.export import export_sleep_csv
+        from strapkit.export import export_sleep_csv
         sleeps = client.get_all_sleep()
         if not sleeps:
             pytest.skip("No sleep data available")
@@ -401,7 +401,7 @@ class TestExport:
         assert len(content) > 0
 
     def test_export_workout_csv_with_real_data(self, client, tmp_path):
-        from whoopyy.export import export_workout_csv
+        from strapkit.export import export_workout_csv
         workouts = client.get_all_workouts()
         if not workouts:
             pytest.skip("No workout data available")

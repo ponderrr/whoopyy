@@ -1,5 +1,5 @@
 """
-Tests for whoopyy.export._validate_export_path.
+Tests for strapkit.export._validate_export_path.
 
 The guard only inspects (never writes to) paths, so system locations are checked
 by name. Everything user-side lives under tmp_path with HOME pointed at it.
@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from whoopyy.export import (
+from strapkit.export import (
     _open_export_file,
     _validate_export_path,
     export_cycle_csv,
@@ -22,7 +22,7 @@ from whoopyy.export import (
     export_workout_csv,
     generate_summary_report,
 )
-from whoopyy.models import Cycle, Recovery, Sleep, Workout
+from strapkit.models import Cycle, Recovery, Sleep, Workout
 
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="POSIX path rules")
 
@@ -114,9 +114,9 @@ class TestSystemLocations:
         "path",
         [
             "/usr/local/x.csv",
-            "/usr/local/share/whoopyy/x.csv",
+            "/usr/local/share/strapkit/x.csv",
             "/tmp/x.csv",
-            "/tmp/whoopyy/x.csv",
+            "/tmp/strapkit/x.csv",
             "/private/tmp/x.csv",
             # Only whole path components count, not string prefixes.
             "/bootcamp/x.csv",
@@ -206,9 +206,9 @@ class TestSensitiveHomeLocations:
             "x.csv",
             "exports/x.csv",
             "Documents/whoop/x.csv",
-            "Library/Application Support/whoopyy/x.csv",
+            "Library/Application Support/strapkit/x.csv",
             ".config/x.csv",
-            ".config/whoopyy/x.csv",
+            ".config/strapkit/x.csv",
             # Look-alikes: only whole path components count.
             ".ssh-notes/x.csv",
             ".config/gcloud-notes/x.csv",
@@ -225,7 +225,7 @@ class TestSensitiveHomeLocations:
 
     def test_unknown_user_tilde_is_a_value_error(self, home):
         with pytest.raises(ValueError, match="Cannot resolve export path"):
-            _validate_export_path("~no-such-user-whoopyy-test/x.csv")
+            _validate_export_path("~no-such-user-strapkit-test/x.csv")
 
     def test_missing_home_skips_home_rules(self, tmp_path, monkeypatch):
         def no_home(cls):

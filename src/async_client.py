@@ -13,7 +13,7 @@ Features:
 
 Example:
     >>> import asyncio
-    >>> from whoopyy.async_client import AsyncWhoopClient
+    >>> from strapkit.async_client import AsyncWhoopClient
     >>> 
     >>> async def fetch_data():
     ...     async with AsyncWhoopClient(
@@ -199,7 +199,7 @@ class AsyncWhoopClient:
             headers={
                 "Accept": "application/json",
                 "Content-Type": "application/json",
-                "User-Agent": f"whoopyy/{__version__}",
+                "User-Agent": f"strapkit/{__version__}",
             },
         )
         

@@ -18,7 +18,7 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - run: pip install -e ".[dev]"
-      - run: pytest --tb=short -q --cov=whoopyy --cov-report=term --cov-fail-under=90
+      - run: pytest --tb=short -q --cov=strapkit --cov-report=term --cov-fail-under=90
 
   checks:
     name: Type check, version, package
@@ -34,7 +34,7 @@ jobs:
         run: |
           python -m build
           twine check dist/*
-          python -m zipfile -l dist/*.whl | grep -q "whoopyy/py.typed"
+          python -m zipfile -l dist/*.whl | grep -q "strapkit/py.typed"
       - name: Check version consistency
         run: |
           python - <<'PY'

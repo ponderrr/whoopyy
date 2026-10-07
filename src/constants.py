@@ -1,5 +1,5 @@
 """
-API constants and configuration for WhoopYY.
+API constants and configuration for strapkit.
 
 This module contains all static configuration values used throughout the SDK.
 No magic numbers - all values are named constants with clear documentation.

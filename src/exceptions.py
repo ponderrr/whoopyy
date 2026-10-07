@@ -1,5 +1,5 @@
 """
-Custom exceptions for WhoopYY SDK.
+Custom exceptions for the strapkit SDK.
 
 Exception Hierarchy:
     Exception (built-in)
@@ -15,7 +15,7 @@ Error Classification:
     - FATAL: Auth errors, validation errors (4xx except 429)
 
 Example:
-    >>> from whoopyy.exceptions import WhoopRateLimitError
+    >>> from strapkit.exceptions import WhoopRateLimitError
     >>> try:
     ...     client.get_recovery_collection()
     ... except WhoopRateLimitError as e:
@@ -41,7 +41,7 @@ class WhoopError(Exception):
     """
     Base exception for all Whoop SDK errors.
     
-    All WhoopYY exceptions inherit from this class, allowing users to catch
+    All strapkit exceptions inherit from this class, allowing users to catch
     all SDK-related errors with a single except clause.
     
     Attributes:
@@ -272,7 +272,7 @@ def is_retryable_error(error: WhoopError) -> bool:
         True if the error should be retried, False otherwise.
     
     Example:
-        >>> from whoopyy.exceptions import is_retryable_error
+        >>> from strapkit.exceptions import is_retryable_error
         >>> try:
         ...     client.get_recovery(123)
         ... except WhoopError as e:

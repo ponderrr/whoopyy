@@ -1,5 +1,5 @@
 """
-Utility functions for WhoopYY SDK.
+Utility functions for the strapkit SDK.
 
 This module provides helper functions for:
 - Token storage and retrieval (atomic, owner-only token file)
@@ -9,7 +9,7 @@ This module provides helper functions for:
 - Rate limit header parsing
 
 Example:
-    >>> from whoopyy.utils import save_tokens, load_tokens, is_token_expired
+    >>> from strapkit.utils import save_tokens, load_tokens, is_token_expired
     >>> save_tokens(token_data, ".whoop_tokens.json")
     >>> tokens = load_tokens(".whoop_tokens.json")
     >>> if is_token_expired(tokens):
@@ -146,7 +146,7 @@ _IN_PLACE_TEMP_ERRNOS = frozenset({errno.EACCES, errno.EPERM})
 Errors creating the temp file that make save_tokens rewrite the file in place.
 
 They mean the token file's directory is not writable, while the file itself
-may still be (the in-place write of whoopyy 0.3.x worked there).
+may still be (the in-place write of 0.3.x worked there).
 """
 
 _IN_PLACE_REPLACE_ERRNOS = frozenset({errno.EBUSY})

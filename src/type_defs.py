@@ -1,5 +1,5 @@
 """
-Type definitions for WhoopYY SDK.
+Type definitions for the strapkit SDK.
 
 This module defines TypedDict structures for internal data contracts.
 These are primarily used for:
@@ -14,7 +14,7 @@ Timestamps are ISO 8601 strings, as they arrive on the wire.
 For public API models, use Pydantic models in the models module instead.
 
 Example:
-    >>> from whoopyy.type_defs import TokenData
+    >>> from strapkit.type_defs import TokenData
     >>> tokens: TokenData = {
     ...     "access_token": "abc123",
     ...     "refresh_token": "xyz789",

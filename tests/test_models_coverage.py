@@ -1,5 +1,5 @@
 """
-Targeted tests for whoopyy.models to reach high coverage.
+Targeted tests for strapkit.models to reach high coverage.
 
 Covers property methods on: BodyMeasurement, StageSummary, SleepNeeded,
 SleepScore, Cycle, WorkoutZoneDuration (all zone minutes), Workout,
@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from whoopyy.models import (
+from strapkit.models import (
     BodyMeasurement,
     Cycle,
     CycleCollection,

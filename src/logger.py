@@ -1,21 +1,24 @@
 """
-Logging configuration for WhoopYY SDK.
+Logging configuration for the strapkit SDK.
 
 Provides structured logging with contextual information for debugging
 and monitoring API interactions.
 
 Usage:
-    >>> from whoopyy.logger import get_logger
+    >>> from strapkit.logger import get_logger
     >>> logger = get_logger(__name__)
     >>> logger.info("Recovery fetched", extra={"recovery_id": 123, "score": 75.5})
 
 Configuration:
-    Set the WHOOPYY_LOG_LEVEL environment variable to control verbosity:
+    Set the STRAPKIT_LOG_LEVEL environment variable to control verbosity:
     - DEBUG: Detailed debugging information
     - INFO: General operational messages (default)
     - WARNING: Potential issues
     - ERROR: Error conditions
     - CRITICAL: Severe errors
+
+    The pre-rename variable WHOOPYY_LOG_LEVEL is deprecated. It is still
+    read, but only when STRAPKIT_LOG_LEVEL is unset or empty.
 """
 
 import logging
@@ -24,8 +27,35 @@ from typing import Optional
 
 __all__ = ["get_logger", "set_log_level", "disable_logging", "enable_logging"]
 
+_LOG_LEVEL_ENV_VAR = "STRAPKIT_LOG_LEVEL"
+"""Environment variable that sets the default SDK log level."""
+
+_DEPRECATED_LOG_LEVEL_ENV_VAR = "WHOOPYY_LOG_LEVEL"
+"""
+Deprecated pre-rename name of _LOG_LEVEL_ENV_VAR.
+
+Read only when _LOG_LEVEL_ENV_VAR is unset or empty.
+"""
+
 # Module-level cache for loggers
 _loggers: dict[str, logging.Logger] = {}
+
+
+def _env_log_level() -> int:
+    """
+    Read the default log level from the environment.
+
+    STRAPKIT_LOG_LEVEL wins; the deprecated WHOOPYY_LOG_LEVEL is used only
+    when STRAPKIT_LOG_LEVEL is unset or empty. A missing or unknown level
+    name means INFO.
+    """
+    name = (
+        os.environ.get(_LOG_LEVEL_ENV_VAR)
+        or os.environ.get(_DEPRECATED_LOG_LEVEL_ENV_VAR)
+        or "INFO"
+    )
+    level = getattr(logging, name.strip().upper(), logging.INFO)
+    return level if isinstance(level, int) else logging.INFO
 
 
 def get_logger(
@@ -41,7 +71,8 @@ def get_logger(
     Args:
         name: Logger name, typically __name__ from calling module.
         level: Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL).
-               If None, uses WHOOPYY_LOG_LEVEL env var or defaults to INFO.
+               If None, uses the STRAPKIT_LOG_LEVEL env var (or the
+               deprecated WHOOPYY_LOG_LEVEL) or defaults to INFO.
     
     Returns:
         Configured logging.Logger instance.
@@ -49,7 +80,7 @@ def get_logger(
     Example:
         >>> logger = get_logger(__name__)
         >>> logger.info("Token refreshed", extra={"expires_in": 3600})
-        2024-01-01 12:00:00 - whoopyy.auth - INFO - Token refreshed
+        2024-01-01 12:00:00 - strapkit.auth - INFO - Token refreshed
         
         >>> logger.error(
         ...     "API request failed",
@@ -63,8 +94,7 @@ def get_logger(
     
     # Determine log level
     if level is None:
-        env_level = os.environ.get("WHOOPYY_LOG_LEVEL", "INFO").upper()
-        level = getattr(logging, env_level, logging.INFO)
+        level = _env_log_level()
     
     # Create logger
     logger = logging.getLogger(name)
@@ -93,7 +123,7 @@ def get_logger(
 
 def set_log_level(level: int) -> None:
     """
-    Set log level for all WhoopYY loggers.
+    Set log level for all strapkit loggers.
     
     Useful for dynamically adjusting verbosity during debugging.
     
@@ -102,9 +132,9 @@ def set_log_level(level: int) -> None:
     
     Example:
         >>> import logging
-        >>> from whoopyy.logger import set_log_level
+        >>> from strapkit.logger import set_log_level
         >>> set_log_level(logging.DEBUG)
-        >>> # All whoopyy loggers now log at DEBUG level
+        >>> # All strapkit loggers now log at DEBUG level
     """
     for logger in _loggers.values():
         logger.setLevel(level)
@@ -114,14 +144,14 @@ def set_log_level(level: int) -> None:
 
 def disable_logging() -> None:
     """
-    Disable all WhoopYY logging.
+    Disable all strapkit logging.
     
     Useful for tests or when logging is handled externally.
     
     Example:
-        >>> from whoopyy.logger import disable_logging
+        >>> from strapkit.logger import disable_logging
         >>> disable_logging()
-        >>> # No more log output from whoopyy
+        >>> # No more log output from strapkit
     """
     for logger in _loggers.values():
         logger.disabled = True
@@ -129,10 +159,10 @@ def disable_logging() -> None:
 
 def enable_logging() -> None:
     """
-    Re-enable WhoopYY logging after disabling.
+    Re-enable strapkit logging after disabling.
     
     Example:
-        >>> from whoopyy.logger import enable_logging
+        >>> from strapkit.logger import enable_logging
         >>> enable_logging()
         >>> # Logging restored
     """

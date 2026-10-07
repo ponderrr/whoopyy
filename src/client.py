@@ -13,7 +13,7 @@ Features:
     - Context manager support for resource cleanup
 
 Example:
-    >>> from whoopyy import WhoopClient
+    >>> from strapkit import WhoopClient
     >>> 
     >>> # Initialize and authenticate
     >>> client = WhoopClient(
@@ -198,7 +198,7 @@ class WhoopClient:
             headers={
                 "Accept": "application/json",
                 "Content-Type": "application/json",
-                "User-Agent": f"whoopyy/{__version__}",
+                "User-Agent": f"strapkit/{__version__}",
             },
         )
         

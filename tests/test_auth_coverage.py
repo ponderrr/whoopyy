@@ -1,5 +1,5 @@
 """
-Targeted tests for whoopyy.auth to boost coverage.
+Targeted tests for strapkit.auth to boost coverage.
 
 Covers: _CallbackHandler HTML methods and request handling, the
         _CallbackServer result recording, OAuthHandler._build_authorization_url,
@@ -12,7 +12,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from whoopyy.auth import (
+from strapkit.auth import (
     OAuthHandler,
     _CallbackHandler,
     _CallbackServer,
@@ -30,8 +30,8 @@ def _isolate_default_token_file(tmp_path, monkeypatch):
     """
     import os
 
-    import whoopyy.auth as auth_module
-    from whoopyy.constants import DEFAULT_TOKEN_FILE
+    import strapkit.auth as auth_module
+    from strapkit.constants import DEFAULT_TOKEN_FILE
 
     safe_path = str(tmp_path / "default_whoop_tokens.json")
     default_path = os.path.abspath(DEFAULT_TOKEN_FILE)

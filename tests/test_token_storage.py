@@ -1,5 +1,5 @@
 """
-Tests for crash-safe and concurrency-safe token storage in whoopyy.utils.
+Tests for crash-safe and concurrency-safe token storage in strapkit.utils.
 
 Covers claim C11 and the JWT redaction in _sanitize_error_response:
 - save_tokens is atomic: concurrent readers never see a missing or partial
@@ -32,7 +32,7 @@ import types
 
 import pytest
 
-from whoopyy import utils
+from strapkit import utils
 
 try:
     import fcntl
@@ -128,7 +128,7 @@ def _child_token_file_lock_probe(token_path: str) -> str:
     """Ask another process to take token_file_lock without waiting."""
     return _run_child(
         f"""
-        from whoopyy.utils import token_file_lock
+        from strapkit.utils import token_file_lock
         try:
             with token_file_lock({token_path!r}, timeout=0):
                 print("acquired")
@@ -793,7 +793,7 @@ class TestTokenFileLockInProcess:
             with utils.token_file_lock(token_path):
                 acquired.set()
 
-        caplog.set_level(logging.DEBUG, logger="whoopyy.utils")
+        caplog.set_level(logging.DEBUG, logger="strapkit.utils")
         signal = WaitingSignal()
         utils.logger.addHandler(signal)
         try:
@@ -888,7 +888,7 @@ class TestTokenFileLockFallbacks:
     def test_no_locking_primitive_is_a_noop(self, token_path, monkeypatch, caplog):
         monkeypatch.setattr(utils, "_fcntl", None)
         monkeypatch.setattr(utils, "_msvcrt", None)
-        caplog.set_level(logging.DEBUG, logger="whoopyy.utils")
+        caplog.set_level(logging.DEBUG, logger="strapkit.utils")
 
         with utils.token_file_lock(token_path):
             with utils.token_file_lock(token_path):  # no registry, so nesting is harmless

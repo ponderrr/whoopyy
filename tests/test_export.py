@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from whoopyy.export import (
+from strapkit.export import (
     RecoveryTrends,
     SleepTrends,
     TrainingLoadTrends,
@@ -29,7 +29,7 @@ from whoopyy.export import (
     export_workout_csv,
     generate_summary_report,
 )
-from whoopyy.models import (
+from strapkit.models import (
     Cycle,
     CycleScore,
     Recovery,
@@ -510,7 +510,7 @@ class TestExportCycleCsvNoAttributeError:
 
     def test_export_cycle_csv_no_attribute_error(self) -> None:
         """Calling export_cycle_csv on a scored Cycle should not raise AttributeError."""
-        from whoopyy.models import CycleScore
+        from strapkit.models import CycleScore
 
         score = CycleScore(
             strain=12.5,
@@ -544,7 +544,7 @@ class TestExportCycleCsvNoAttributeError:
 
     def test_analyze_training_load_no_attribute_error(self) -> None:
         """analyze_training_load with a scored Cycle should not raise AttributeError."""
-        from whoopyy.models import CycleScore
+        from strapkit.models import CycleScore
 
         score = CycleScore(
             strain=10.0,
@@ -573,7 +573,7 @@ class TestExportSleepCsvAttributeAccess:
 
     def test_export_sleep_csv_stage_summary_access(self) -> None:
         """export_sleep_csv with a non-None StageSummary should not raise AttributeError."""
-        from whoopyy.models import StageSummary, SleepNeeded
+        from strapkit.models import StageSummary, SleepNeeded
 
         stage_summary = StageSummary(
             total_in_bed_time_milli=28800000,

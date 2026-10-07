@@ -1,10 +1,10 @@
 """
-Unit tests for whoopyy constants (WHOOP Developer API v2 endpoint paths).
+Unit tests for strapkit constants (WHOOP Developer API v2 endpoint paths).
 """
 
 import pytest
 
-from whoopyy import constants
+from strapkit import constants
 
 
 EXPECTED_ENDPOINTS = {

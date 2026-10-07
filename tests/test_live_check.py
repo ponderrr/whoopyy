@@ -31,9 +31,10 @@ from typing import Any, Dict, Iterator, List, Literal, Optional, Set
 import httpx
 import pytest
 
-from whoopyy.client import WhoopClient
-from whoopyy.constants import DEFAULT_TOKEN_FILE
-from whoopyy.utils import save_tokens
+import strapkit
+from strapkit.client import WhoopClient
+from strapkit.constants import DEFAULT_TOKEN_FILE
+from strapkit.utils import save_tokens
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SCRIPT_PATH = REPO_ROOT / "scripts" / "live_check.py"
@@ -41,7 +42,7 @@ SCRIPT_PATH = REPO_ROOT / "scripts" / "live_check.py"
 
 def _load_script() -> Any:
     """Import scripts/live_check.py as a module (scripts/ is not a package)."""
-    spec = importlib.util.spec_from_file_location("whoopyy_live_check", SCRIPT_PATH)
+    spec = importlib.util.spec_from_file_location("strapkit_live_check", SCRIPT_PATH)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
@@ -490,7 +491,7 @@ def guards(monkeypatch: pytest.MonkeyPatch) -> Dict[str, List[Any]]:
 
     monkeypatch.setattr(httpx.HTTPTransport, "handle_request", no_network)
     monkeypatch.setattr("webbrowser.open", no_browser)
-    monkeypatch.setattr("whoopyy.auth.OAuthHandler.authorize", no_oauth)
+    monkeypatch.setattr("strapkit.auth.OAuthHandler.authorize", no_oauth)
     monkeypatch.setattr(
         WhoopClient, "revoke_access", lambda self: calls["revoke"].append(True),
     )
@@ -571,6 +572,7 @@ class TestEndToEnd:
         assert report["summary"] == {
             "endpoints": 12, "ok": 11, "fail": 1, "skipped": 0, "exit_code": 1,
         }
+        assert report["strapkit_version"] == strapkit.__version__
 
     def test_records_validation_error_path_and_type(
         self, tmp_path: Path, env: None, guards: Dict[str, List[Any]],
@@ -1149,7 +1151,7 @@ class TestHelpers:
     def test_sdk_log_levels_are_restored(
         self, tmp_path: Path, env: None, guards: Dict[str, List[Any]],
     ) -> None:
-        logger = logging.getLogger("whoopyy.client")
+        logger = logging.getLogger("strapkit.client")
         before = logger.level
         _run(FakeWhoop(), tmp_path / "out")
         assert logger.level == before

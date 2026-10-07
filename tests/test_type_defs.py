@@ -1,5 +1,5 @@
 """
-Unit tests for whoopyy.type_defs raw response types.
+Unit tests for strapkit.type_defs raw response types.
 
 The required/optional keys of each TypedDict must match the WHOOP v2 API
 component schemas (required keys in the spec are required here).
@@ -7,7 +7,7 @@ component schemas (required keys in the spec are required here).
 
 import pytest
 
-from whoopyy import type_defs
+from strapkit import type_defs
 
 
 @pytest.mark.parametrize(

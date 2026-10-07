@@ -38,13 +38,13 @@ from unittest.mock import patch
 
 import httpx
 import pytest
-import whoopyy.auth as auth_module
-import whoopyy.utils as utils_module
-from whoopyy.async_client import AsyncWhoopClient
-from whoopyy.auth import OAuthHandler
-from whoopyy.client import WhoopClient
-from whoopyy.exceptions import WhoopAuthError, WhoopTokenError
-from whoopyy.utils import load_tokens, save_tokens
+import strapkit.auth as auth_module
+import strapkit.utils as utils_module
+from strapkit.async_client import AsyncWhoopClient
+from strapkit.auth import OAuthHandler
+from strapkit.client import WhoopClient
+from strapkit.exceptions import WhoopAuthError, WhoopTokenError
+from strapkit.utils import load_tokens, save_tokens
 
 from tests.test_auth_hardening import (  # noqa: F401 - autouse fixture
     CLIENT_ID,

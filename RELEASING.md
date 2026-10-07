@@ -1,6 +1,6 @@
-# Releasing whoopyy
+# Releasing strapkit
 
-This runbook publishes **whoopyy 0.4.0**, the first version to go to PyPI. The upload runs in
+This runbook publishes **strapkit 0.4.0**, the first version to go to PyPI. The upload runs in
 GitHub Actions (`.github/workflows/publish.yml`) through PyPI
 [trusted publishing](https://docs.pypi.org/trusted-publishers/), so no API token is stored
 anywhere. Section 1 is one-time setup, section 2 is the pre-release checklist, and section 3 is
@@ -8,18 +8,18 @@ the release itself. For later releases, see [Later releases](#later-releases).
 
 ## Current state
 
-As of 2026-10-06:
+As of 2026-10-07:
 
 | | |
 |---|---|
 | Version in source | `0.4.0` in `pyproject.toml`, `setup.py` and `src/__init__.py` on branch `release/0.4.0`. **Not released.** `main` (`2555601`) still holds the 0.3.1 code. `release/0.4.0` has not been pushed (the remote has only `main`), so there is no release PR yet |
-| PyPI / TestPyPI | `whoopyy` does not exist on either index (both JSON APIs return 404). Nothing has been uploaded |
+| PyPI / TestPyPI | `strapkit` does not exist on either index (both JSON APIs return 404, checked 2026-10-07). Nothing has been uploaded |
 | GitHub releases | `v0.2.0`, `v0.3.0` and `v0.3.1` (marked Latest). All three send data calls to WHOOP's retired `/developer/v1` API |
 | Publish workflow | Has never run. It was added in `2555601`, after `v0.3.1` was tagged |
 | GitHub environments | None. `testpypi` and `pypi` still need to be created ([1.3](#13-create-the-github-environments)) |
 | Branch protection | `main` is not protected. The last two CI runs on `main` (2026-03-15) failed under the old `ci.yml`, which `release/0.4.0` replaces |
-| Tests | 1,074 collected: 1,050 pass and 24 skip on Python 3.9, 3.10, 3.11, 3.12 and 3.13 (~96% coverage). The 24 skips are `tests/integration/test_real_api.py`, which needs real WHOOP credentials. CI runs Python 3.9 to 3.13, enforces 90% coverage and runs `mypy --strict` |
-| Package build | `python -m build` plus `twine check` pass. The wheel contains `whoopyy/py.typed`, and mypy picks up its types from an installed copy (checked locally on 2026-10-06) |
+| Tests | 1,084 collected: 1,060 pass and 24 skip on Python 3.9, 3.10, 3.11, 3.12 and 3.13 (~96% coverage). The 24 skips are `tests/integration/test_real_api.py`, which needs real WHOOP credentials. CI runs Python 3.9 to 3.13, enforces 90% coverage and runs `mypy --strict` |
+| Package build | `python -m build` plus `twine check` pass. The wheel contains `strapkit/py.typed`, and mypy picks up its types from an installed copy (checked locally on 2026-10-07) |
 | License | GPL-3.0-only |
 
 Run the test suite again before you release. The auth-hardening work on another branch will
@@ -37,20 +37,27 @@ before you tag.
 | `test` | Run test suite | | | Python 3.11: `pip install -e ".[dev]"`, `pytest --tb=short -q`, `mypy src/ --ignore-missing-imports` |
 | `build` | Build distribution | `test` | | Fails unless the release tag equals `v` + the `pyproject.toml` version, then `python -m build`, `twine check dist/*`, and uploads artifact `dist` (kept 7 days) |
 | `publish-testpypi` | Publish to TestPyPI | `build` | `testpypi` | `pypa/gh-action-pypi-publish@release/v1` to `https://test.pypi.org/legacy/` with `skip-existing: true`. `permissions: id-token: write` |
-| `verify-testpypi` | Verify TestPyPI install | `publish-testpypi` | | `pip install whoopyy==<tag version>` from TestPyPI (dependencies from PyPI), retrying every 30 s up to 10 times, then imports the clients, models and exceptions |
+| `verify-testpypi` | Verify TestPyPI install | `publish-testpypi` | | `pip install strapkit==<tag version>` from TestPyPI (dependencies from PyPI), retrying every 30 s up to 10 times, then imports the clients, models and exceptions |
 | `publish-pypi` | Publish to PyPI | `verify-testpypi` | `pypi` | `pypa/gh-action-pypi-publish@release/v1` to PyPI. `permissions: id-token: write` |
-| `verify-pypi` | Verify PyPI install | `publish-pypi` | | `pip install whoopyy==<tag version>`, retrying every 30 s up to 10 times, then imports the clients |
+| `verify-pypi` | Verify PyPI install | `publish-pypi` | | `pip install strapkit==<tag version>`, retrying every 30 s up to 10 times, then imports the clients |
 
 PyPI and GitHub must agree on these values:
 
 | Setting | Value |
 |---|---|
-| Project name (PyPI and TestPyPI) | `whoopyy` |
+| Project name (PyPI and TestPyPI) | `strapkit` |
 | GitHub owner | `ponderrr` |
 | GitHub repository | `whoopyy` |
 | Workflow file | `publish.yml` |
 | Environment for the TestPyPI publisher | `testpypi` |
 | Environment for the PyPI publisher | `pypi` |
+
+The first upload creates the project under `name` in `pyproject.toml`, and PyPI can't rename a
+project afterwards. The distribution name `strapkit` is set in `pyproject.toml` and `setup.py`
+(`name`), in `publish.yml` (the package the `verify-testpypi` and `verify-pypi` jobs install,
+and the two `environment.url` values), on both pending publishers (**PyPI Project Name**,
+[1.2](#12-register-pending-trusted-publishers)) and in the install instructions in `README.md`.
+If it has to change before the first upload, change every one of them.
 
 ## 1. One-time setup
 
@@ -73,7 +80,7 @@ On each site:
    PyPI requires 2FA on every account. Keep the recovery codes somewhere safe.
 
 Sign in as the account that should own the project. Whoever adds the pending publisher becomes
-the owner of `whoopyy` when the first upload succeeds.
+the owner of `strapkit` when the first upload succeeds.
 
 ### 1.2 Register pending trusted publishers
 
@@ -85,7 +92,7 @@ the **GitHub** tab, and fill in:
 
 | Field | Value |
 |---|---|
-| PyPI Project Name | `whoopyy` |
+| PyPI Project Name | `strapkit` |
 | Owner | `ponderrr` |
 | Repository name | `whoopyy` |
 | Workflow name | `publish.yml` |
@@ -103,7 +110,7 @@ Things to watch:
 - PyPI marks **Environment name** as optional, but `publish.yml` runs each upload job in an
   environment, so fill it in. It must match the job's `environment.name`; PyPI ignores case.
   The likeliest mistake is swapping `pypi` and `testpypi`.
-- A pending publisher doesn't reserve the name. If someone else registers `whoopyy` first,
+- A pending publisher doesn't reserve the name. If someone else registers `strapkit` first,
   PyPI invalidates your pending publisher ([5.2](#52-trusted-publisher-errors)).
 - `publish-testpypi` runs first, so a missing or wrong TestPyPI publisher is the first thing
   that fails.
@@ -151,7 +158,7 @@ gh api repos/ponderrr/whoopyy/environments \
   --jq '.environments[] | {name, rules: [.protection_rules[].type]}'
 ```
 
-Required reviewers cost nothing on public repositories, and whoopyy is public.
+Required reviewers cost nothing on public repositories, and this repository is public.
 
 ### 1.4 (Optional) Protect `main`
 
@@ -209,11 +216,11 @@ gh pr checks release/0.4.0 --repo ponderrr/whoopyy --watch
   `python scripts/live_check.py --help` lists the current options. You need a WHOOP developer
   app whose redirect URLs include `http://localhost:8080/callback`; run the script without
   credentials and it prints how to create one. Run it from the `release/0.4.0` checkout, in a
-  virtualenv with that checkout installed, so it tests this code and not another whoopyy:
+  virtualenv with that checkout installed, so it tests this code and not another installed strapkit:
 
   ```bash
   python3 -m venv .venv && . .venv/bin/activate
-  pip install -e .                 # whoopyy 0.4.0 from the release/0.4.0 checkout
+  pip install -e .                 # strapkit 0.4.0 from the release/0.4.0 checkout
   export WHOOP_CLIENT_ID=...       # your WHOOP developer app
   export WHOOP_CLIENT_SECRET=...
   # export WHOOP_REDIRECT_URI=http://localhost:<port>/callback  # only if your app registers a different redirect than http://localhost:8080/callback
@@ -221,7 +228,7 @@ gh pr checks release/0.4.0 --repo ponderrr/whoopyy --watch
   echo $?                          # 0 = every endpoint was called and validated
   ```
 
-  The first lines name the whoopyy it imported. If they include `note: this is not the whoopyy
+  The first lines name the strapkit it imported. If they include `note: this is not the strapkit
   checkout the script lives in`, activate the virtualenv above and run it again. Exit code 0
   allows only `workout` and `activity_mapping` to be skipped (no workout, or no legacy `v1_id`,
   in the window). If `cycle`, `recovery_for_cycle`, `sleep` or `sleep_for_cycle` fail with "not
@@ -235,22 +242,6 @@ gh pr checks release/0.4.0 --repo ponderrr/whoopyy --watch
   `WHOOP_CLIENT_ID`, `WHOOP_CLIENT_SECRET` and `WHOOP_REFRESH_TOKEN`, then run
   `pytest tests/integration/ -v --tb=long`. Neither runs in CI, so this is the only test against
   the real API.
-- [ ] **The distribution name is final.** The first upload, to TestPyPI and then PyPI, creates
-  the project under the `name` in `pyproject.toml`. PyPI can't rename a project: a new name means
-  a second project, with the old one left behind. `whoopyy` contains WHOOP's trademark, and
-  WHOOP's API terms effective 2026-10-06 removed the brand license. Whether to keep the name is
-  your call; this is not legal advice. The README already ends with an "unofficial SDK" and
-  trademark line. You could also put "not affiliated with or endorsed by WHOOP" in the
-  `description` in `pyproject.toml`, which PyPI shows as the summary. If you rename, change all
-  of these before you tag:
-  - `name` in `pyproject.toml` and `setup.py`.
-  - `whoopyy==$VERSION` in `publish.yml`. `verify-testpypi` and `verify-pypi` install by
-    name, so they break if this isn't changed. Also change the two `environment.url` values.
-  - **PyPI Project Name** on both pending publishers.
-  - The install instructions in `README.md`.
-
-  The import name (`import whoopyy`) comes from `packages=["whoopyy"]` in `setup.py` and can
-  stay as it is.
 - [ ] **README and CHANGELOG are accurate.**
   - The 0.4.0 entry in `CHANGELOG.md` matches what the live check showed: v2 paths, UUID
     sleep and workout IDs, `step_count`, `sport_name`.
@@ -267,14 +258,15 @@ gh pr checks release/0.4.0 --repo ponderrr/whoopyy --watch
   grep -n '^## \[0\.4\.0\]' CHANGELOG.md
   ```
 
-  The `Type check, version, package` CI check fails if the three files disagree. Nothing checks
-  the tag against the version, so make sure the tag is exactly `v0.4.0`.
+  The `Type check, version, package` CI check fails if the three files disagree. The publish
+  workflow's `build` job fails if the tag isn't `v` + the `pyproject.toml` version, so tag exactly
+  `v0.4.0`.
 - [ ] **(Optional) Local build dry run.** This is the same thing the `build` job does:
 
   ```bash
   pip install build twine
   rm -rf dist && python -m build && twine check dist/*
-  python -m zipfile -l dist/*.whl | grep whoopyy/py.typed
+  python -m zipfile -l dist/*.whl | grep strapkit/py.typed
   ```
 
 ## 3. Release
@@ -301,7 +293,7 @@ Run these in your main checkout:
 ```bash
 git fetch origin
 git show origin/main:pyproject.toml | grep '^version'   # expect: version = "0.4.0"
-git tag -a v0.4.0 -m "whoopyy 0.4.0" origin/main
+git tag -a v0.4.0 -m "strapkit 0.4.0" origin/main
 git push origin v0.4.0
 ```
 
@@ -315,11 +307,11 @@ This is the step that starts the publish workflow. Everything before it can be u
 ```bash
 git show v0.4.0:CHANGELOG.md \
   | awk '/^## \[0\.4\.0\]/{found=1; next} /^## \[/{if (found) exit} found' \
-  > /tmp/whoopyy-0.4.0-notes.md
+  > /tmp/strapkit-0.4.0-notes.md
 
 gh release create v0.4.0 --repo ponderrr/whoopyy --verify-tag \
   --title "v0.4.0 — Back to the WHOOP v2 API" \
-  --notes-file /tmp/whoopyy-0.4.0-notes.md
+  --notes-file /tmp/strapkit-0.4.0-notes.md
 ```
 
 - The `awk` command extracts the body of the 0.4.0 section, without its heading.
@@ -368,9 +360,8 @@ because zsh treats unquoted `[]` as a glob.
 
 Before you approve `pypi`, check two things:
 
-- The `verify-testpypi` log shows `whoopyy version: 0.4.0` and `All imports successful`. The
-  install isn't pinned to a version, so read the version line.
-- https://test.pypi.org/project/whoopyy/0.4.0/ renders the README and shows the GPL-3.0-only
+- The `verify-testpypi` log shows `strapkit version: 0.4.0` and `All imports successful`.
+- https://test.pypi.org/project/strapkit/0.4.0/ renders the README and shows the GPL-3.0-only
   license and Python >=3.9.
 
 This is your last chance to stop. If you reject `pypi`, nothing reaches PyPI. TestPyPI keeps
@@ -383,18 +374,18 @@ Use a fresh virtualenv:
 ```bash
 D=$(mktemp -d) && cd "$D"
 python3 -m venv venv
-venv/bin/pip install --no-cache-dir "whoopyy==0.4.0" mypy
-venv/bin/python -c "import whoopyy; print(whoopyy.__version__, whoopyy.__file__)"
-printf 'import whoopyy\nreveal_type(whoopyy.__version__)\nreveal_type(whoopyy.WhoopClient.get_cycle)\n' > typed_check.py
+venv/bin/pip install --no-cache-dir "strapkit==0.4.0" mypy
+venv/bin/python -c "import strapkit; print(strapkit.__version__, strapkit.__file__)"
+printf 'import strapkit\nreveal_type(strapkit.__version__)\nreveal_type(strapkit.WhoopClient.get_cycle)\n' > typed_check.py
 venv/bin/python -m mypy typed_check.py
 ```
 
-Expected output (the locally built wheel gave the same result on 2026-10-06):
+Expected output (the locally built wheel gave the same result on 2026-10-07):
 
 ```text
-0.4.0 /.../venv/lib/python3.X/site-packages/whoopyy/__init__.py
+0.4.0 /.../venv/lib/python3.X/site-packages/strapkit/__init__.py
 typed_check.py:2: note: Revealed type is "str"
-typed_check.py:3: note: Revealed type is "def (self: whoopyy.client.WhoopClient, cycle_id: int) -> whoopyy.models.Cycle"
+typed_check.py:3: note: Revealed type is "def (self: strapkit.client.WhoopClient, cycle_id: int) -> strapkit.models.Cycle"
 Success: no issues found in 1 source file
 ```
 
@@ -403,12 +394,12 @@ mypy 1.x, which is what pip installs on Python 3.9 (the macOS `/usr/bin/python3`
 fine: the check passes as long as mypy reveals these types and doesn't print `missing library
 stubs or py.typed marker`.
 
-If mypy instead says `Skipping analyzing "whoopyy": module is installed, but missing library
+If mypy instead says `Skipping analyzing "strapkit": module is installed, but missing library
 stubs or py.typed marker`, the wheel has no `py.typed`. Yank the release
 ([5.7](#57-yanking-a-bad-release)) and fix it. If pip says `No matching distribution found`,
 PyPI's CDN hasn't caught up yet; wait a minute and try again.
 
-Also look at https://pypi.org/project/whoopyy/: the README should render and the license and
+Also look at https://pypi.org/project/strapkit/: the README should render and the license and
 Python requirement should be right. The SHA-256 hashes printed by `publish-pypi`
 (`print-hash: true`) should match the hashes listed under "Download files".
 
@@ -421,7 +412,7 @@ the top of its notes:
 
 ```bash
 cat > /tmp/v1-warning.md <<'EOF'
-> **Do not use this release.** It sends its data calls to WHOOP's retired `/developer/v1` API, so they no longer work. Use [v0.4.0](https://github.com/ponderrr/whoopyy/releases/tag/v0.4.0) or later (`pip install -U whoopyy`). The [0.4.0 changelog](https://github.com/ponderrr/whoopyy/blob/main/CHANGELOG.md#040---2026-10-06) has migration notes.
+> **Do not use this release.** It sends its data calls to WHOOP's retired `/developer/v1` API, so they no longer work. Use [v0.4.0](https://github.com/ponderrr/whoopyy/releases/tag/v0.4.0) or later. The package is now named `strapkit`: `pip install strapkit`, then `import strapkit`. The [0.4.0 changelog](https://github.com/ponderrr/whoopyy/blob/main/CHANGELOG.md#040---2026-10-06) has migration notes.
 
 EOF
 gh release view v0.3.1 --repo ponderrr/whoopyy --json body --jq .body > /tmp/v0.3.1-body.md
@@ -437,7 +428,7 @@ isn't, run `gh release edit v0.4.0 --repo ponderrr/whoopyy --latest`.
 
 ### 4.2 Housekeeping
 
-- On PyPI, go to Your projects → whoopyy → Manage → Publishing. The publisher should now be
+- On PyPI, go to Your projects → strapkit → Manage → Publishing. The publisher should now be
   listed against the project, and the pending entry should be gone. Check TestPyPI the same way.
 - Update [Current state](#current-state) in this file, and start an `## [Unreleased]` section
   in `CHANGELOG.md`.
@@ -446,7 +437,8 @@ isn't, run `gh release edit v0.4.0 --repo ponderrr/whoopyy --latest`.
 
 - The GitHub release notifies everyone watching the repository. Anyone on 0.2.0 to 0.3.1
   installed it from GitHub, since those versions were never on PyPI. Their data calls fail, and
-  they should run `pip install -U whoopyy`.
+  they should run `pip install strapkit` and change their imports to `strapkit` (see the
+  0.4.0 migration notes).
 - If you like, pin a GitHub issue with the same message and post it wherever you've shared the
   project. Don't claim more than the CHANGELOG says.
 
@@ -484,7 +476,7 @@ Below that, the log prints the token's claims. For this repository they should r
 | Message | Cause | Fix |
 |---|---|---|
 | `invalid-publisher` ... `(Publisher with matching claims was not found)` | No publisher on that index matches owner + repository + workflow file + environment. Usually the TestPyPI publisher is missing, **Workflow name** was entered as a path, **Environment name** is wrong or `pypi` and `testpypi` are swapped, or there's a typo. A wrong environment gives this message too, not a separate one | On the index the failing job uploads to, add the publisher if it's missing. PyPI can't edit a publisher in place, so otherwise remove it and add it again with the right values (environment `testpypi` on TestPyPI, `pypi` on PyPI). Then re-run failed jobs |
-| `invalid-pending-publisher`: `valid token, but project already exists` | `whoopyy` already exists on that index. Pending publishers don't reserve names | If the project is yours, add an ordinary publisher under the project's Manage → Publishing. If not, choose a new name ([section 2](#2-pre-release-checklist)) |
+| `invalid-pending-publisher`: `valid token, but project already exists` | `strapkit` already exists on that index. Pending publishers don't reserve names | If the project is yours, add an ordinary publisher under the project's Manage → Publishing. If not, choose a new name and change it everywhere it is set ([How the publish workflow runs](#how-the-publish-workflow-runs)) |
 | `OpenID Connect token retrieval failed` | The job is missing `permissions: id-token: write` | Both upload jobs in `publish.yml` have it, so this only happens if the workflow was edited |
 
 See also https://docs.pypi.org/trusted-publishers/troubleshooting/.
@@ -500,7 +492,7 @@ See also https://docs.pypi.org/trusted-publishers/troubleshooting/.
 
 ### 5.4 `verify-testpypi` can't find the package
 
-`ERROR: No matching distribution found for whoopyy==0.4.0` on every one of the 10 attempts
+`ERROR: No matching distribution found for strapkit==0.4.0` on every one of the 10 attempts
 (about 5 minutes) means TestPyPI's index still hadn't updated. Re-run failed jobs. `verify-pypi`
 retries the same way and can fail the same way.
 
@@ -533,8 +525,8 @@ Upload by hand only if the `dist` artifact has expired:
    `pip install build twine && python -m build --sdist` (or `--wheel`). A rebuilt file differs
    from the original, which is fine for a file name PyPI has never had, but PyPI refuses it under
    a name it already has.
-2. Create an API token scoped to `whoopyy` under PyPI Account settings → API tokens.
-3. Run `twine upload dist/whoopyy-0.4.0.tar.gz` (or the wheel). For TestPyPI, use a TestPyPI
+2. Create an API token scoped to `strapkit` under PyPI Account settings → API tokens.
+3. Run `twine upload dist/strapkit-0.4.0.tar.gz` (or the wheel). For TestPyPI, use a TestPyPI
    token and add `--repository testpypi`.
 4. Delete the token.
 
@@ -546,16 +538,16 @@ Upload by hand only if the `dist` artifact has expired:
 - `400 This filename was previously used by a file that has since been deleted`: deleting a file
   or release doesn't free its file name. Bump the version.
 - An error saying the name isn't allowed or is too similar to an existing project: PyPI blocks
-  names that collide with an existing project after normalization. Choose another name
-  ([section 2](#2-pre-release-checklist)).
+  names that collide with an existing project after normalization. Choose another name and
+  change it everywhere it is set ([How the publish workflow runs](#how-the-publish-workflow-runs)).
 
 ### 5.7 Yanking a bad release
 
-Yank the release rather than deleting it. Once a release is yanked, `pip install whoopyy` and
-version ranges skip it, but `pip install whoopyy==0.4.0` still installs it, with a warning. The
+Yank the release rather than deleting it. Once a release is yanked, `pip install strapkit` and
+version ranges skip it, but `pip install strapkit==0.4.0` still installs it, with a warning. The
 files stay on PyPI. Deleting is permanent, and the file names can never be uploaded again.
 
-1. Go to https://pypi.org/manage/project/whoopyy/releases/, open 0.4.0, choose **Options** →
+1. Go to https://pypi.org/manage/project/strapkit/releases/, open 0.4.0, choose **Options** →
    **Yank**, enter a reason (pip shows it to users), and confirm. You can un-yank from the same
    menu.
 2. Edit the GitHub release notes to say the release was yanked and why.
@@ -573,12 +565,12 @@ The publishers and environments stay in place, so a later release needs only:
 4. Tag `vX.Y.Z` on `origin/main` and create the release from that CHANGELOG section, as in
    [3.2](#32-tag-v040) and [3.3](#33-create-the-github-release) with the version changed.
 5. Approve and verify as in [3.4](#34-watch-the-run-and-approve) and
-   [3.5](#35-verify-on-pypi). The verify jobs install `whoopyy` without a version pin, so check
-   that the version they print is the new one.
+   [3.5](#35-verify-on-pypi). The verify jobs install `strapkit` at the tag's version; check that
+   the version they print is the new one.
 
 ## Versioning
 
-whoopyy follows [semver](https://semver.org/). While it is on 0.x:
+strapkit follows [semver](https://semver.org/). While it is on 0.x:
 
 - **MINOR** (0.x.0): new features and breaking changes. 0.3 → 0.4 was a breaking change.
 - **PATCH** (0.4.x): bug fixes with no API changes.

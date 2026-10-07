@@ -22,7 +22,7 @@ be saved never spends the grant; and an async refresh runs in its own task,
 so cancelling its caller cannot drop the rotated refresh token.
 
 Example:
-    >>> from whoopyy.auth import OAuthHandler
+    >>> from strapkit.auth import OAuthHandler
     >>> auth = OAuthHandler(
     ...     client_id="your_client_id",
     ...     client_secret="your_client_secret"
@@ -556,7 +556,7 @@ class _CallbackHandler(BaseHTTPRequestHandler):
 <!DOCTYPE html>
 <html>
 <head>
-    <title>WhoopYY - Authorization Successful</title>
+    <title>strapkit - Authorization Successful</title>
     <style>
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -600,7 +600,7 @@ class _CallbackHandler(BaseHTTPRequestHandler):
 <!DOCTYPE html>
 <html>
 <head>
-    <title>WhoopYY - Authorization Failed</title>
+    <title>strapkit - Authorization Failed</title>
     <style>
         body {{
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -1276,7 +1276,7 @@ class OAuthHandler:
             threading.Thread(
                 target=s.serve_forever,
                 kwargs={"poll_interval": 0.1},
-                name="whoopyy-oauth-callback",
+                name="strapkit-oauth-callback",
                 daemon=True,
             )
             for s in servers

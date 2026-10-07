@@ -5,8 +5,8 @@ import os
 import time
 from datetime import datetime, timedelta, timezone
 
-from whoopyy import AsyncWhoopClient
-from whoopyy.auth import OAuthHandler
+from strapkit import AsyncWhoopClient
+from strapkit.auth import OAuthHandler
 
 
 async def main() -> None:

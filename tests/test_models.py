@@ -14,7 +14,7 @@ import pytest
 from datetime import datetime, timezone
 from pydantic import ValidationError
 
-from whoopyy.models import (
+from strapkit.models import (
     # User Profile
     UserProfileBasic,
     BodyMeasurement,
@@ -1234,7 +1234,7 @@ class TestZoneDurationsAlias:
         assert zones.zone_five_minutes == 5.0
 
     def test_alias_exported_from_models(self) -> None:
-        from whoopyy import models
+        from strapkit import models
         assert "ZoneDurations" in models.__all__
 
 
@@ -1453,10 +1453,10 @@ class TestV2PackageExports:
 
     @pytest.mark.parametrize("name", ["ActivityIdMapping", "ZoneDurations"])
     def test_exported_from_package(self, name) -> None:
-        import whoopyy
-        assert name in whoopyy.__all__
-        assert getattr(whoopyy, name) is not None
+        import strapkit
+        assert name in strapkit.__all__
+        assert getattr(strapkit, name) is not None
 
     def test_package_version_is_0_4_0(self) -> None:
-        import whoopyy
-        assert whoopyy.__version__ == "0.4.0"
+        import strapkit
+        assert strapkit.__version__ == "0.4.0"

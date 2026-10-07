@@ -12,8 +12,8 @@ Features:
     - Sleep quality metrics
 
 Example:
-    >>> from whoopyy import WhoopClient
-    >>> from whoopyy.export import (
+    >>> from strapkit import WhoopClient
+    >>> from strapkit.export import (
     ...     export_recovery_csv,
     ...     export_sleep_csv,
     ...     analyze_recovery_trends,

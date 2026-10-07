@@ -1,5 +1,5 @@
 """
-Unit tests for whoopyy utility functions.
+Unit tests for strapkit utility functions.
 
 Tests cover:
 - save_tokens: file creation, content correctness, file permissions
@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 import httpx
 import pytest
 
-from whoopyy import utils
+from strapkit import utils
 
 
 # =============================================================================

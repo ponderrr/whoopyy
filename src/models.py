@@ -37,7 +37,7 @@ Model Hierarchy:
         - ActivityIdMapping: Legacy v1 activity ID to v2 UUID
 
 Example:
-    >>> from whoopyy.models import Recovery, RecoveryScore
+    >>> from strapkit.models import Recovery, RecoveryScore
     >>> score = RecoveryScore(
     ...     user_calibrating=False,
     ...     recovery_score=75.5,

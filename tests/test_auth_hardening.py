@@ -34,13 +34,13 @@ from unittest.mock import patch
 import httpx
 import pytest
 
-import whoopyy.auth as auth_module
-from whoopyy.async_client import AsyncWhoopClient
-from whoopyy.auth import AUTHORIZATION_ENDED_MESSAGE, OAuthHandler
-from whoopyy.client import WhoopClient
-from whoopyy.constants import API_BASE_URL
-from whoopyy.exceptions import WhoopAuthError, WhoopTokenError
-from whoopyy.utils import load_tokens, save_tokens
+import strapkit.auth as auth_module
+from strapkit.async_client import AsyncWhoopClient
+from strapkit.auth import AUTHORIZATION_ENDED_MESSAGE, OAuthHandler
+from strapkit.client import WhoopClient
+from strapkit.constants import API_BASE_URL
+from strapkit.exceptions import WhoopAuthError, WhoopTokenError
+from strapkit.utils import load_tokens, save_tokens
 
 
 @pytest.fixture(autouse=True)
@@ -53,7 +53,7 @@ def _isolate_default_token_file(tmp_path, monkeypatch):
     """
     import os
 
-    from whoopyy.constants import DEFAULT_TOKEN_FILE
+    from strapkit.constants import DEFAULT_TOKEN_FILE
 
     safe_path = str(tmp_path / "default_whoop_tokens.json")
     default_path = os.path.abspath(DEFAULT_TOKEN_FILE)
@@ -764,7 +764,7 @@ class TestDeadRefreshToken:
         endpoint = RotatingTokenEndpoint("rt0")
 
         def other_process_refreshes_first(form: Dict[str, str]) -> None:
-            # A process that does not share our lock (e.g. an older whoopyy)
+            # A process that does not share our lock (e.g. a 0.3.x release)
             # spends rt0 and saves its result just before our request lands.
             issued = endpoint.issue()
             _write_tokens(path, issued["access_token"], issued["refresh_token"], 3600)

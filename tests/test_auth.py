@@ -17,9 +17,9 @@ from unittest.mock import Mock, patch, MagicMock
 import pytest
 import httpx
 
-from whoopyy.auth import OAuthHandler, _CallbackServer
-from whoopyy.exceptions import WhoopAuthError, WhoopTokenError
-from whoopyy.constants import OAUTH_AUTHORIZE_URL, OAUTH_TOKEN_URL, SCOPES
+from strapkit.auth import OAuthHandler, _CallbackServer
+from strapkit.exceptions import WhoopAuthError, WhoopTokenError
+from strapkit.constants import OAUTH_AUTHORIZE_URL, OAUTH_TOKEN_URL, SCOPES
 
 
 @pytest.fixture(autouse=True)
@@ -33,8 +33,8 @@ def _isolate_default_token_file(tmp_path, monkeypatch):
     """
     import os
 
-    import whoopyy.auth as auth_module
-    from whoopyy.constants import DEFAULT_TOKEN_FILE
+    import strapkit.auth as auth_module
+    from strapkit.constants import DEFAULT_TOKEN_FILE
 
     safe_path = str(tmp_path / "default_whoop_tokens.json")
     default_path = os.path.abspath(DEFAULT_TOKEN_FILE)
@@ -319,7 +319,7 @@ class TestTokenRefresh:
             "post",
             return_value=mock_response
         ):
-            with patch("whoopyy.auth.save_tokens"):
+            with patch("strapkit.auth.save_tokens"):
                 new_tokens = oauth_handler.refresh_access_token()
 
         assert new_tokens["access_token"] == "test_access_token"
@@ -332,7 +332,7 @@ class TestTokenRefresh:
         """Test refresh when no tokens are stored."""
         oauth_handler._tokens = None
         
-        with patch("whoopyy.auth.load_tokens", return_value=None):
+        with patch("strapkit.auth.load_tokens", return_value=None):
             with pytest.raises(WhoopTokenError) as exc:
                 oauth_handler.refresh_access_token()
             
@@ -353,7 +353,7 @@ class TestTokenRefresh:
         }
         oauth_handler._tokens = None
         
-        with patch("whoopyy.auth.load_tokens", return_value=tokens_without_refresh):
+        with patch("strapkit.auth.load_tokens", return_value=tokens_without_refresh):
             with pytest.raises(WhoopTokenError) as exc:
                 oauth_handler.refresh_access_token()
             
@@ -416,7 +416,7 @@ class TestTokenManagement:
         """Test loading and getting token from file."""
         oauth_handler._tokens = None
         
-        with patch("whoopyy.auth.load_tokens", return_value=mock_tokens):
+        with patch("strapkit.auth.load_tokens", return_value=mock_tokens):
             token = oauth_handler.get_valid_token()
         
         assert token == "test_access_token"
@@ -447,7 +447,7 @@ class TestTokenManagement:
             "post",
             return_value=mock_response
         ):
-            with patch("whoopyy.auth.save_tokens"):
+            with patch("strapkit.auth.save_tokens"):
                 token = oauth_handler.get_valid_token()
 
         assert token == "test_access_token"
@@ -459,7 +459,7 @@ class TestTokenManagement:
         """Test getting token when none available."""
         oauth_handler._tokens = None
         
-        with patch("whoopyy.auth.load_tokens", return_value=None):
+        with patch("strapkit.auth.load_tokens", return_value=None):
             with pytest.raises(WhoopTokenError) as exc:
                 oauth_handler.get_valid_token()
             
@@ -482,7 +482,7 @@ class TestTokenManagement:
         """Test has_valid_tokens when no tokens."""
         oauth_handler._tokens = None
         
-        with patch("whoopyy.auth.load_tokens", return_value=None):
+        with patch("strapkit.auth.load_tokens", return_value=None):
             assert oauth_handler.has_valid_tokens() is False
     
     def test_has_valid_tokens_expired_with_refresh(
@@ -765,7 +765,7 @@ class TestConcurrentTokenRefresh:
 def test_token_file_permissions(tmp_path):
     """Token file should be created with 600 permissions."""
     import os
-    from whoopyy import utils
+    from strapkit import utils
     filepath = tmp_path / "tokens.json"
     utils.save_tokens({"access_token": "x", "refresh_token": "y"}, filepath=str(filepath))
     mode = oct(os.stat(filepath).st_mode & 0o777)
@@ -776,9 +776,9 @@ def test_callback_timeout_raises(monkeypatch, tmp_path):
     """If no callback received before the deadline, WhoopAuthError should be raised."""
     import socket
 
-    import whoopyy.auth as auth_module
-    from whoopyy.auth import OAuthHandler
-    from whoopyy.exceptions import WhoopAuthError
+    import strapkit.auth as auth_module
+    from strapkit.auth import OAuthHandler
+    from strapkit.exceptions import WhoopAuthError
 
     probe = socket.socket()
     probe.bind(("127.0.0.1", 0))
@@ -801,7 +801,7 @@ def test_callback_timeout_raises(monkeypatch, tmp_path):
 
 def test_token_file_path_is_absolute():
     """TOKEN_FILE_PATH should be an absolute path."""
-    from whoopyy import constants
+    from strapkit import constants
     assert constants.TOKEN_FILE_PATH.startswith("/")
 
 
@@ -837,7 +837,7 @@ class TestTokenRefreshRetry:
 
     def test_refresh_retries_on_503(self):
         """Token refresh should retry on 503, succeed on third attempt."""
-        from whoopyy.constants import MAX_RETRIES
+        from strapkit.constants import MAX_RETRIES
 
         handler = self._make_handler_with_tokens()
 
@@ -856,8 +856,8 @@ class TestTokenRefreshRetry:
         ]
 
         with patch.object(handler._http_client, "post", side_effect=responses) as mock_post:
-            with patch("whoopyy.auth.save_tokens"):
-                with patch("whoopyy.auth.time") as mock_time:
+            with patch("strapkit.auth.save_tokens"):
+                with patch("strapkit.auth.time") as mock_time:
                     mock_time.sleep = Mock()
                     tokens = handler.refresh_access_token()
 
@@ -866,14 +866,14 @@ class TestTokenRefreshRetry:
 
     def test_refresh_raises_after_max_retries(self):
         """Token refresh should raise WhoopTokenError after MAX_RETRIES+1 503 responses."""
-        from whoopyy.constants import MAX_RETRIES
+        from strapkit.constants import MAX_RETRIES
 
         handler = self._make_handler_with_tokens()
 
         responses = [self._make_mock_response(503) for _ in range(MAX_RETRIES + 1)]
 
         with patch.object(handler._http_client, "post", side_effect=responses) as mock_post:
-            with patch("whoopyy.auth.time") as mock_time:
+            with patch("strapkit.auth.time") as mock_time:
                 mock_time.sleep = Mock()
                 with pytest.raises(WhoopTokenError):
                     handler.refresh_access_token()
@@ -908,8 +908,8 @@ class TestTokenRefreshRetry:
         mock_resp = self._make_mock_response(200, json_data=response_without_refresh)
 
         with patch.object(handler._http_client, "post", return_value=mock_resp):
-            with patch("whoopyy.auth.save_tokens"):
-                with patch("whoopyy.auth.logger") as mock_logger:
+            with patch("strapkit.auth.save_tokens"):
+                with patch("strapkit.auth.logger") as mock_logger:
                     handler.refresh_access_token()
 
         warning_calls = mock_logger.warning.call_args_list
@@ -920,7 +920,7 @@ class TestTokenRefreshRetry:
 
     def test_token_refresh_buffer_triggers(self):
         """Token expiring in 30s (< buffer of 60s) should trigger proactive refresh."""
-        from whoopyy.constants import TOKEN_REFRESH_BUFFER_SECONDS
+        from strapkit.constants import TOKEN_REFRESH_BUFFER_SECONDS
 
         handler = OAuthHandler(
             client_id="test_client_id",
@@ -962,7 +962,7 @@ class TestTokenRefreshRetry:
 
     def test_token_refresh_buffer_not_triggered(self):
         """Token expiring in 300s (> buffer of 60s) should not trigger proactive refresh."""
-        from whoopyy.constants import TOKEN_REFRESH_BUFFER_SECONDS
+        from strapkit.constants import TOKEN_REFRESH_BUFFER_SECONDS
 
         handler = OAuthHandler(
             client_id="test_client_id",
@@ -1017,7 +1017,7 @@ class TestTokenCacheAndLocking:
             "scope": "offline",
         }
 
-        with patch("whoopyy.auth.load_tokens") as mock_load:
+        with patch("strapkit.auth.load_tokens") as mock_load:
             token = handler.get_valid_token()
 
         mock_load.assert_not_called()
@@ -1049,8 +1049,8 @@ class TestTokenCacheAndLocking:
 
     def test_token_expiry_uses_buffer(self):
         """Token expiring within buffer should be considered expired."""
-        from whoopyy.constants import TOKEN_REFRESH_BUFFER_SECONDS
-        from whoopyy.utils import is_token_expired
+        from strapkit.constants import TOKEN_REFRESH_BUFFER_SECONDS
+        from strapkit.utils import is_token_expired
 
         tokens = {
             "access_token": "test",
@@ -1065,8 +1065,8 @@ class TestTokenCacheAndLocking:
 
     def test_token_not_expired_outside_buffer(self):
         """Token expiring well after buffer should not be considered expired."""
-        from whoopyy.constants import TOKEN_REFRESH_BUFFER_SECONDS
-        from whoopyy.utils import is_token_expired
+        from strapkit.constants import TOKEN_REFRESH_BUFFER_SECONDS
+        from strapkit.utils import is_token_expired
 
         tokens = {
             "access_token": "test",

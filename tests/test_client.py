@@ -19,9 +19,10 @@ from unittest.mock import Mock, patch, MagicMock
 import pytest
 import httpx
 
-from whoopyy.client import WhoopClient
-from whoopyy.constants import API_BASE_URL, ENDPOINTS
-from whoopyy.models import (
+import strapkit
+from strapkit.client import WhoopClient
+from strapkit.constants import API_BASE_URL, ENDPOINTS
+from strapkit.models import (
     ActivityIdMapping,
     UserProfileBasic,
     BodyMeasurement,
@@ -35,7 +36,7 @@ from whoopyy.models import (
     Workout,
     WorkoutCollection,
 )
-from whoopyy.exceptions import (
+from strapkit.exceptions import (
     WhoopAPIError,
     WhoopAuthError,
     WhoopNetworkError,
@@ -44,7 +45,7 @@ from whoopyy.exceptions import (
     WhoopValidationError,
     is_retryable_error,
 )
-from whoopyy.utils import save_tokens
+from strapkit.utils import save_tokens
 
 
 @pytest.fixture(autouse=True)
@@ -58,8 +59,8 @@ def _isolate_default_token_file(tmp_path, monkeypatch):
     """
     import os
 
-    import whoopyy.auth as auth_module
-    from whoopyy.constants import DEFAULT_TOKEN_FILE
+    import strapkit.auth as auth_module
+    from strapkit.constants import DEFAULT_TOKEN_FILE
 
     safe_path = str(tmp_path / "default_whoop_tokens.json")
     default_path = os.path.abspath(DEFAULT_TOKEN_FILE)
@@ -137,7 +138,7 @@ def mock_auth(tmp_path):
 @pytest.fixture
 def client(mock_auth):
     """Create a WhoopClient with mocked auth."""
-    with patch("whoopyy.client.OAuthHandler", return_value=mock_auth):
+    with patch("strapkit.client.OAuthHandler", return_value=mock_auth):
         c = WhoopClient(
             client_id="test_client_id",
             client_secret="test_client_secret",
@@ -225,7 +226,7 @@ class TestWhoopClientInit:
     
     def test_valid_initialization(self, mock_auth) -> None:
         """Test creating client with valid parameters."""
-        with patch("whoopyy.client.OAuthHandler", return_value=mock_auth):
+        with patch("strapkit.client.OAuthHandler", return_value=mock_auth):
             client = WhoopClient(
                 client_id="test_id",
                 client_secret="test_secret",
@@ -234,6 +235,7 @@ class TestWhoopClientInit:
             assert client.client_id == "test_id"
             assert client.client_secret == "test_secret"
             assert client._authenticated is False
+            assert client._http_client.headers["User-Agent"] == f"strapkit/{strapkit.__version__}"
             
             client.close()
     
@@ -318,7 +320,7 @@ class TestRequest:
             client._http_client,
             "request",
             return_value=mock_response
-        ) as mock_request, patch("whoopyy.client.time.sleep") as mock_sleep:
+        ) as mock_request, patch("strapkit.client.time.sleep") as mock_sleep:
             with pytest.raises(WhoopRateLimitError) as exc:
                 client._request("GET", "/test")
 
@@ -874,7 +876,7 @@ class TestContextManager:
     
     def test_context_manager_closes_resources(self, mock_auth) -> None:
         """Test that context manager closes all resources."""
-        with patch("whoopyy.client.OAuthHandler", return_value=mock_auth):
+        with patch("strapkit.client.OAuthHandler", return_value=mock_auth):
             with WhoopClient(
                 client_id="test_id",
                 client_secret="test_secret",
@@ -1501,7 +1503,7 @@ class TestHTTPConnectionPooling:
 
     def test_client_closes_session_on_exit(self, mock_auth):
         """Session should be closed after context manager exit."""
-        with patch("whoopyy.client.OAuthHandler", return_value=mock_auth):
+        with patch("strapkit.client.OAuthHandler", return_value=mock_auth):
             with WhoopClient(
                 client_id="test_id", client_secret="test_secret"
             ) as c:
@@ -1532,7 +1534,7 @@ class TestRateLimitHeaders:
         ]
         with patch.object(
             client._http_client, "request", side_effect=responses
-        ) as mock_request, patch("whoopyy.client.time.sleep") as mock_sleep:
+        ) as mock_request, patch("strapkit.client.time.sleep") as mock_sleep:
             result = client._request("GET", "/test")
 
         assert result == {"ok": True}
@@ -1543,7 +1545,7 @@ class TestRateLimitHeaders:
         """X-RateLimit-Reset wins over Retry-After, for the wait and the error."""
         response = self._rate_limited({"Retry-After": "30", "X-RateLimit-Reset": "7"})
         with patch.object(client._http_client, "request", return_value=response), \
-                patch("whoopyy.client.time.sleep") as mock_sleep:
+                patch("strapkit.client.time.sleep") as mock_sleep:
             with pytest.raises(WhoopRateLimitError) as exc:
                 client._request("GET", "/test")
 
@@ -1554,7 +1556,7 @@ class TestRateLimitHeaders:
         """Lowercase header names in a plain dict are still honoured."""
         response = self._rate_limited({"x-ratelimit-reset": "9"})
         with patch.object(client._http_client, "request", return_value=response), \
-                patch("whoopyy.client.time.sleep") as mock_sleep:
+                patch("strapkit.client.time.sleep") as mock_sleep:
             with pytest.raises(WhoopRateLimitError) as exc:
                 client._request("GET", "/test")
 
@@ -1565,7 +1567,7 @@ class TestRateLimitHeaders:
         """Long resets are capped at 2 minutes; the error reports the real value."""
         response = self._rate_limited({"X-RateLimit-Reset": "500"})
         with patch.object(client._http_client, "request", return_value=response) as mock_request, \
-                patch("whoopyy.client.time.sleep") as mock_sleep:
+                patch("strapkit.client.time.sleep") as mock_sleep:
             with pytest.raises(WhoopRateLimitError) as exc:
                 client._request("GET", "/test")
 
@@ -1577,7 +1579,7 @@ class TestRateLimitHeaders:
         """Without rate limit headers the wait defaults to 60 seconds."""
         response = self._rate_limited({})
         with patch.object(client._http_client, "request", return_value=response), \
-                patch("whoopyy.client.time.sleep") as mock_sleep:
+                patch("strapkit.client.time.sleep") as mock_sleep:
             with pytest.raises(WhoopRateLimitError) as exc:
                 client._request("GET", "/test")
 
@@ -1588,7 +1590,7 @@ class TestRateLimitHeaders:
         """A negative X-RateLimit-Reset is ignored in favour of Retry-After."""
         response = self._rate_limited({"X-RateLimit-Reset": "-3", "Retry-After": "4"})
         with patch.object(client._http_client, "request", return_value=response), \
-                patch("whoopyy.client.time.sleep") as mock_sleep:
+                patch("strapkit.client.time.sleep") as mock_sleep:
             with pytest.raises(WhoopRateLimitError) as exc:
                 client._request("GET", "/test")
 
@@ -1609,7 +1611,7 @@ class TestRateLimitHeaders:
                                              "first_name": "A", "last_name": "B"})
 
         _install_mock_transport(client, handler)
-        with patch("whoopyy.client.time.sleep") as mock_sleep:
+        with patch("strapkit.client.time.sleep") as mock_sleep:
             profile = client.get_profile_basic()
 
         assert isinstance(profile, UserProfileBasic)

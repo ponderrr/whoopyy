@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to WhoopYY will be documented in this file.
+All notable changes to strapkit (formerly whoopyy) will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
@@ -13,6 +13,8 @@ no longer supports. This release moves the SDK back to the v2 API and matches th
 WHOOP's v2 OpenAPI spec. Everyone on 0.2.0–0.3.1 should upgrade.
 
 ### Breaking Changes
+- Renamed: the distribution and import package `whoopyy` is now `strapkit` (`pip install strapkit`, `import strapkit`). Class names are unchanged
+- Logger names start with `strapkit` instead of `whoopyy` (`strapkit.client`, `strapkit.auth`, ...), the log level comes from `STRAPKIT_LOG_LEVEL` (see Deprecated for `WHOOPYY_LOG_LEVEL`), and requests send `User-Agent: strapkit/<version>`
 - All data endpoints now use `/developer/v2/...`. Sleep and workout IDs are UUID strings; cycle IDs stay integers
 - `Workout.sport_name` is required again (`str`). WHOOP v2 always returns it, which reverses the 0.2.0 change
 - `Workout.sport_id` is now `Optional[int]` and may be `None`. WHOOP has deprecated it ("will not exist past 09/01/2025")
@@ -25,11 +27,11 @@ WHOOP's v2 OpenAPI spec. Everyone on 0.2.0–0.3.1 should upgrade.
 ### Added
 - `get_sleep_for_cycle(cycle_id)` on both clients — `GET /developer/v2/cycle/{cycle_id}/sleep`
 - `get_activity_mapping(activity_v1_id)` on both clients — `GET /developer/v1/activity-mapping/{activity_v1_id}`, returns the v2 UUID for a legacy v1 sleep or workout ID. This is the only v1 path WHOOP still documents
-- `ActivityIdMapping` model (`v2_activity_id: str`) and `ZoneDurations` (alias of `WorkoutZoneDuration`), both exported from `whoopyy`
+- `ActivityIdMapping` model (`v2_activity_id: str`) and `ZoneDurations` (alias of `WorkoutZoneDuration`), both exported from `strapkit`
 - `Cycle.step_count` (`Optional[int]`); `None` when WHOOP has no step data for the cycle
 - `Sleep.v1_id` and `Workout.v1_id` (`Optional[int]`, deprecated by WHOOP)
 - `utils.parse_rate_limit_reset(headers, default=60)` — seconds to wait after a 429
-- `format_sport_name(sport_name)` — display label for a v2 `sport_name`, exported from `whoopyy`
+- `format_sport_name(sport_name)` — display label for a v2 `sport_name`, exported from `strapkit`
 - `TrainingLoadTrends.average_daily_steps` (mean over scored cycles that report steps); `generate_summary_report()` adds an "Average Daily Steps" line when step data exists
 - `ENDPOINTS` keys `user_access`, `sleep_for_cycle` and `activity_mapping`
 - `type_defs`: `RecoveryResponse`, `SleepResponse`, `SleepNeededResponse`, `CycleResponse`, `WorkoutResponse`, `ZoneDurationsResponse`, `ActivityIdMappingResponse`
@@ -39,7 +41,7 @@ WHOOP's v2 OpenAPI spec. Everyone on 0.2.0–0.3.1 should upgrade.
 - `OAuthHandler.refresh_if_stale(seen_access_token)` and `async_refresh_if_stale(seen_access_token)`, used by both clients after a 401. They refresh only if no other thread, coroutine or process has already replaced the rejected token
 - `OAuthHandler.clear_tokens()` and `async_clear_tokens()`
 - `utils.token_file_lock(filepath, *, timeout=None)` and `utils.async_token_file_lock(...)`, an exclusive cross-process lock on a `<filepath>.lock` sidecar file. It uses `fcntl.flock` on POSIX and `msvcrt.locking` on Windows, and is a logged no-op when neither exists or the lock file cannot be created. The async version waits with `asyncio.sleep`. The lock is not re-entrant: taking it again on the same thread or task raises `RuntimeError` instead of deadlocking. `timeout=0` tries once, and a timeout that runs out raises `TimeoutError`
-- `whoopyy.auth` constants `CALLBACK_TIMEOUT_SECONDS` (120), `CALLBACK_SOCKET_TIMEOUT_SECONDS` (10) and `AUTHORIZATION_ENDED_MESSAGE`
+- `strapkit.auth` constants `CALLBACK_TIMEOUT_SECONDS` (120), `CALLBACK_SOCKET_TIMEOUT_SECONDS` (10) and `AUTHORIZATION_ENDED_MESSAGE`
 
 ### Changed
 - 429 handling reads `X-RateLimit-Reset` (WHOOP's documented header) first, then `Retry-After`, then falls back to 60s. The wait is still capped at 120s with one automatic retry, and `WhoopRateLimitError.retry_after` carries the parsed value
@@ -65,16 +67,17 @@ WHOOP's v2 OpenAPI spec. Everyone on 0.2.0–0.3.1 should upgrade.
 - For a `localhost` redirect URI the callback server listens on both `127.0.0.1` and `::1` (where the machine has IPv6). A port on which another program already accepts connections on one of the loopback addresses raises `WhoopAuthError` (see Security)
 
 ### Deprecated
+- `WHOOPYY_LOG_LEVEL` environment variable — use `STRAPKIT_LOG_LEVEL`. The old name is still read, but only when `STRAPKIT_LOG_LEVEL` is unset or empty
 - `WorkoutScore.zone_duration` attribute — use `zone_durations`
 - `Workout.sport_id`, `Workout.v1_id` and `Sleep.v1_id` — deprecated by WHOOP
 
 ### Removed
 - `revoke_access()` no longer calls `/oauth/oauth2/revoke`, which requires client authentication and is not WHOOP's documented revocation method
-- Private `whoopyy.auth._reset_callback_handler()` and the shared result attributes on `_CallbackHandler`. The callback result now lives on the per-flow `_CallbackServer`
+- Private `auth._reset_callback_handler()` and the shared result attributes on `_CallbackHandler`. The callback result now lives on the per-flow `_CallbackServer`
 
 ### Fixed
 - Data calls reach WHOOP's supported v2 API again
-- Ship a PEP 561 `py.typed` marker in the sdist and wheel, so downstream type checkers use whoopyy's annotations instead of treating the package as untyped
+- Ship a PEP 561 `py.typed` marker in the sdist and wheel, so downstream type checkers use strapkit's annotations instead of treating the package as untyped
 - README license section said "Proprietary — All Rights Reserved"; it now matches the LICENSE file and package metadata (GPL-3.0-only)
 - Docstring examples: `cycle.score.strain` (was the nonexistent `cycle.score.score`), UUID sleep/workout IDs, v2 paths
 - Duplicate "Access token revoked" log line in `AsyncWhoopClient.revoke_access()`
@@ -110,6 +113,7 @@ WHOOP's v2 OpenAPI spec. Everyone on 0.2.0–0.3.1 should upgrade.
 - Error text redaction now works. JWTs (signed, encrypted, unsigned and lone `eyJ...` segments), the values of `access_token`, `refresh_token`, `id_token` and `client_secret` in JSON or form bodies, and Ory opaque tokens (`ory_at_...`, `ory_rt_...`) are replaced with `[REDACTED]` before truncation. The 0.3.1 claim "strip JWT patterns" was not true until this release
 
 ### Migration from 0.3.x
+- Replace `whoopyy` with `strapkit` in imports and `mock.patch` targets (`from strapkit import WhoopClient`), install `strapkit` (`pip uninstall whoopyy`, then `pip install strapkit`), and set `STRAPKIT_LOG_LEVEL` instead of `WHOOPYY_LOG_LEVEL`. Logging configuration that names `"whoopyy.*"` loggers must name `"strapkit.*"` instead. Each SDK logger (`strapkit.client`, `strapkit.auth`, ...) sets its own level and handler, so configuring only the `"strapkit"` parent does not change them; use `STRAPKIT_LOG_LEVEL` or `strapkit.logger.set_log_level()`
 - `score.zone_duration` → `score.zone_durations` (the old name still works, with a `DeprecationWarning`)
 - Treat `workout.sport_id` as optional; use `workout.sport_name` or `workout.sport_display_name` instead
 - `workout.sport_display_name` still returns readable labels (`"Running"`, `"HIIT"`), now derived from `sport_name`; a sport missing from `SPORT_NAMES` gets capitalized words (`"non-sleep-deep-rest"` → `"Non Sleep Deep Rest"`)

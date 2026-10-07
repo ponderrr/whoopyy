@@ -18,9 +18,10 @@ from datetime import date, datetime, timezone
 
 import httpx
 
-from whoopyy.async_client import AsyncWhoopClient
-from whoopyy.constants import API_BASE_URL, ENDPOINTS
-from whoopyy.models import (
+import strapkit
+from strapkit.async_client import AsyncWhoopClient
+from strapkit.constants import API_BASE_URL, ENDPOINTS
+from strapkit.models import (
     ActivityIdMapping,
     UserProfileBasic,
     Recovery,
@@ -29,7 +30,7 @@ from whoopyy.models import (
     Cycle,
     Workout,
 )
-from whoopyy.exceptions import (
+from strapkit.exceptions import (
     WhoopAPIError,
     WhoopAuthError,
     WhoopNetworkError,
@@ -38,7 +39,7 @@ from whoopyy.exceptions import (
     WhoopValidationError,
     is_retryable_error,
 )
-from whoopyy.utils import save_tokens
+from strapkit.utils import save_tokens
 
 
 @pytest.fixture(autouse=True)
@@ -52,8 +53,8 @@ def _isolate_default_token_file(tmp_path, monkeypatch):
     """
     import os
 
-    import whoopyy.auth as auth_module
-    from whoopyy.constants import DEFAULT_TOKEN_FILE
+    import strapkit.auth as auth_module
+    from strapkit.constants import DEFAULT_TOKEN_FILE
 
     safe_path = str(tmp_path / "default_whoop_tokens.json")
     default_path = os.path.abspath(DEFAULT_TOKEN_FILE)
@@ -134,7 +135,7 @@ def mock_auth(tmp_path):
 @pytest.fixture
 def async_client(mock_auth):
     """Create an AsyncWhoopClient with mocked auth."""
-    with patch("whoopyy.async_client.OAuthHandler", return_value=mock_auth):
+    with patch("strapkit.async_client.OAuthHandler", return_value=mock_auth):
         client = AsyncWhoopClient(
             client_id="test_client_id",
             client_secret="test_client_secret",
@@ -187,7 +188,7 @@ class TestAsyncWhoopClientInit:
     
     def test_valid_initialization(self, mock_auth) -> None:
         """Test creating client with valid parameters."""
-        with patch("whoopyy.async_client.OAuthHandler", return_value=mock_auth):
+        with patch("strapkit.async_client.OAuthHandler", return_value=mock_auth):
             client = AsyncWhoopClient(
                 client_id="test_id",
                 client_secret="test_secret",
@@ -196,6 +197,7 @@ class TestAsyncWhoopClientInit:
             assert client.client_id == "test_id"
             assert client.client_secret == "test_secret"
             assert client._authenticated is False
+            assert client._http_client.headers["User-Agent"] == f"strapkit/{strapkit.__version__}"
     
     def test_empty_client_id_rejected(self) -> None:
         """Test that empty client_id raises error."""
@@ -270,7 +272,7 @@ class TestAsyncRequest:
         async_client._http_client.request = AsyncMock(return_value=mock_response)
 
         with patch(
-            "whoopyy.async_client.asyncio.sleep", new_callable=AsyncMock
+            "strapkit.async_client.asyncio.sleep", new_callable=AsyncMock
         ) as mock_sleep:
             with pytest.raises(WhoopRateLimitError) as exc:
                 await async_client._request("GET", "/test")
@@ -674,7 +676,7 @@ class TestAsyncContextManager:
     @pytest.mark.asyncio
     async def test_async_context_manager(self, mock_auth) -> None:
         """Test async context manager."""
-        with patch("whoopyy.async_client.OAuthHandler", return_value=mock_auth):
+        with patch("strapkit.async_client.OAuthHandler", return_value=mock_auth):
             async with AsyncWhoopClient(
                 client_id="test_id",
                 client_secret="test_secret",
@@ -981,7 +983,7 @@ class TestAsyncSleepPagination:
 
         async_client._http_client.request = AsyncMock(return_value=mock_response)
 
-        from whoopyy.models import SleepCollection
+        from strapkit.models import SleepCollection
         collection = await async_client.get_sleep_collection(limit=10)
 
         assert isinstance(collection, SleepCollection)
@@ -1067,7 +1069,7 @@ class TestAsyncCyclePagination:
 
         async_client._http_client.request = AsyncMock(return_value=mock_response)
 
-        from whoopyy.models import CycleCollection, Cycle
+        from strapkit.models import CycleCollection, Cycle
         collection = await async_client.get_cycle_collection(limit=10)
 
         assert isinstance(collection, CycleCollection)
@@ -1129,7 +1131,7 @@ class TestAsyncWorkoutPagination:
 
         async_client._http_client.request = AsyncMock(return_value=mock_response)
 
-        from whoopyy.models import WorkoutCollection, Workout
+        from strapkit.models import WorkoutCollection, Workout
         collection = await async_client.get_workout_collection(limit=10)
 
         assert isinstance(collection, WorkoutCollection)
@@ -1364,7 +1366,7 @@ class TestAsyncHTTPConnectionPooling:
     @pytest.mark.asyncio
     async def test_async_client_closes_session_on_exit(self, mock_auth):
         """Async session should be closed after context manager exit."""
-        with patch("whoopyy.async_client.OAuthHandler", return_value=mock_auth):
+        with patch("strapkit.async_client.OAuthHandler", return_value=mock_auth):
             async with AsyncWhoopClient(
                 client_id="test_id", client_secret="test_secret"
             ) as client:
@@ -1395,7 +1397,7 @@ class TestAsyncRateLimitHeaders:
             _json_response({"ok": True}),
         ])
         with patch(
-            "whoopyy.async_client.asyncio.sleep", new_callable=AsyncMock
+            "strapkit.async_client.asyncio.sleep", new_callable=AsyncMock
         ) as mock_sleep:
             result = await async_client._request("GET", "/test")
 
@@ -1410,7 +1412,7 @@ class TestAsyncRateLimitHeaders:
             return_value=self._rate_limited({"Retry-After": "30", "X-RateLimit-Reset": "7"})
         )
         with patch(
-            "whoopyy.async_client.asyncio.sleep", new_callable=AsyncMock
+            "strapkit.async_client.asyncio.sleep", new_callable=AsyncMock
         ) as mock_sleep:
             with pytest.raises(WhoopRateLimitError) as exc:
                 await async_client._request("GET", "/test")
@@ -1425,7 +1427,7 @@ class TestAsyncRateLimitHeaders:
             return_value=self._rate_limited({"x-ratelimit-reset": "9"})
         )
         with patch(
-            "whoopyy.async_client.asyncio.sleep", new_callable=AsyncMock
+            "strapkit.async_client.asyncio.sleep", new_callable=AsyncMock
         ) as mock_sleep:
             with pytest.raises(WhoopRateLimitError) as exc:
                 await async_client._request("GET", "/test")
@@ -1440,7 +1442,7 @@ class TestAsyncRateLimitHeaders:
             return_value=self._rate_limited({"X-RateLimit-Reset": "500"})
         )
         with patch(
-            "whoopyy.async_client.asyncio.sleep", new_callable=AsyncMock
+            "strapkit.async_client.asyncio.sleep", new_callable=AsyncMock
         ) as mock_sleep:
             with pytest.raises(WhoopRateLimitError) as exc:
                 await async_client._request("GET", "/test")
@@ -1454,7 +1456,7 @@ class TestAsyncRateLimitHeaders:
         """Without rate limit headers the wait defaults to 60 seconds."""
         async_client._http_client.request = AsyncMock(return_value=self._rate_limited({}))
         with patch(
-            "whoopyy.async_client.asyncio.sleep", new_callable=AsyncMock
+            "strapkit.async_client.asyncio.sleep", new_callable=AsyncMock
         ) as mock_sleep:
             with pytest.raises(WhoopRateLimitError) as exc:
                 await async_client._request("GET", "/test")
@@ -1469,7 +1471,7 @@ class TestAsyncRateLimitHeaders:
             return_value=self._rate_limited({"X-RateLimit-Reset": "-3", "Retry-After": "4"})
         )
         with patch(
-            "whoopyy.async_client.asyncio.sleep", new_callable=AsyncMock
+            "strapkit.async_client.asyncio.sleep", new_callable=AsyncMock
         ) as mock_sleep:
             with pytest.raises(WhoopRateLimitError) as exc:
                 await async_client._request("GET", "/test")
@@ -1494,7 +1496,7 @@ class TestAsyncRateLimitHeaders:
         _install_mock_transport(async_client, handler)
         try:
             with patch(
-                "whoopyy.async_client.asyncio.sleep", new_callable=AsyncMock
+                "strapkit.async_client.asyncio.sleep", new_callable=AsyncMock
             ) as mock_sleep:
                 profile = await async_client.get_profile_basic()
         finally:
@@ -1893,7 +1895,7 @@ class TestSyncAsyncParity:
     def test_v2_methods_match(self, name) -> None:
         import inspect
 
-        from whoopyy.client import WhoopClient
+        from strapkit.client import WhoopClient
 
         sync_method = getattr(WhoopClient, name)
         async_method = getattr(AsyncWhoopClient, name)

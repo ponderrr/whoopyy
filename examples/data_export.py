@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Data export and analysis example for WhoopYY SDK.
+Data export and analysis example for the strapkit SDK.
 
 Demonstrates:
 - Exporting data to CSV files
@@ -22,7 +22,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from whoopyy import (
+from strapkit import (
     WhoopClient,
     export_recovery_csv,
     export_sleep_csv,
@@ -185,7 +185,7 @@ def main() -> None:
         sys.exit(1)
     
     print("=" * 60)
-    print("WhoopYY Data Export Example")
+    print("strapkit Data Export Example")
     print(f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
     print("=" * 60)
     

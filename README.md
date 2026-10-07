@@ -3,15 +3,17 @@
 <br>
 
 ```
- ██╗    ██╗██╗  ██╗ ██████╗  ██████╗ ██████╗ ██╗   ██╗██╗   ██╗
- ██║    ██║██║  ██║██╔═══██╗██╔═══██╗██╔══██╗╚██╗ ██╔╝╚██╗ ██╔╝
- ██║ █╗ ██║███████║██║   ██║██║   ██║██████╔╝ ╚████╔╝  ╚████╔╝ 
- ██║███╗██║██╔══██║██║   ██║██║   ██║██╔═══╝   ╚██╔╝    ╚██╔╝  
- ╚███╔███╔╝██║  ██║╚██████╔╝╚██████╔╝██║        ██║      ██║   
-  ╚══╝╚══╝ ╚═╝  ╚═╝ ╚═════╝  ╚═════╝ ╚═╝        ╚═╝      ╚═╝   
+ ███████╗████████╗██████╗  █████╗ ██████╗ ██╗  ██╗██╗████████╗
+ ██╔════╝╚══██╔══╝██╔══██╗██╔══██╗██╔══██╗██║ ██╔╝██║╚══██╔══╝
+ ███████╗   ██║   ██████╔╝███████║██████╔╝█████╔╝ ██║   ██║   
+ ╚════██║   ██║   ██╔══██╗██╔══██║██╔═══╝ ██╔═██╗ ██║   ██║   
+ ███████║   ██║   ██║  ██║██║  ██║██║     ██║  ██╗██║   ██║   
+ ╚══════╝   ╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝     ╚═╝  ╚═╝╚═╝   ╚═╝   
 ```
 
 **The complete, type-safe Python SDK for the WHOOP API**
+
+strapkit is an unofficial, independent project. It is not affiliated with, endorsed by, or sponsored by WHOOP, Inc. WHOOP is a trademark of WHOOP, Inc.
 
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-1a1a2e?style=for-the-badge&logo=python&logoColor=e94560)](https://www.python.org)
 [![Pydantic v2](https://img.shields.io/badge/pydantic-v2-1a1a2e?style=for-the-badge&logo=pydantic&logoColor=e94560)](https://docs.pydantic.dev)
@@ -30,7 +32,7 @@
 ---
 
 ```python
-from whoopyy import WhoopClient
+from strapkit import WhoopClient
 
 with WhoopClient(client_id="...", client_secret="...") as client:
     client.authenticate()
@@ -48,7 +50,7 @@ with WhoopClient(client_id="...", client_secret="...") as client:
   Mar 10   28.1%  HRV 22ms  [red]
 ```
 
-<sub>whoopyy also writes INFO log lines to stderr by default; set `WHOOPYY_LOG_LEVEL=WARNING` to see only the output above.</sub>
+<sub>strapkit also writes INFO log lines to stderr by default; set `STRAPKIT_LOG_LEVEL=WARNING` to see only the output above.</sub>
 
 ---
 
@@ -73,18 +75,18 @@ with WhoopClient(client_id="...", client_secret="...") as client:
 ## Install
 
 ```bash
-pip install whoopyy
+pip install strapkit
 ```
 
 ```bash
 # From source
-git clone https://github.com/ponderrr/whoopyy.git
-cd whoopyy && pip install -e .
+git clone https://github.com/ponderrr/whoopyy.git strapkit
+cd strapkit && pip install -e .
 ```
 
 > **Requirements:** Python 3.9+ &mdash; only two dependencies: [`httpx`](https://www.python-httpx.org/) and [`pydantic`](https://docs.pydantic.dev/) v2
 
-> **Upgrading from 0.2.x / 0.3.x (installed from GitHub)?** WHOOP has retired its v1 API, and versions 0.2.0&ndash;0.3.1 send their data calls to v1 paths. 0.4.0 targets the **WHOOP Developer API v2**. It has breaking changes (`zone_duration` &rarr; `zone_durations`, `sport_id` may be `None`, `revoke_access()` now calls `DELETE /developer/v2/user/access`). See the [CHANGELOG](https://github.com/ponderrr/whoopyy/blob/main/CHANGELOG.md#040---2026-10-06) for the migration notes.
+> **Upgrading from 0.2.x / 0.3.x (installed from GitHub)?** WHOOP has retired its v1 API, and versions 0.2.0&ndash;0.3.1 send their data calls to v1 paths. 0.4.0 targets the **WHOOP Developer API v2**. It has breaking changes: the package is now named `strapkit` (`pip install strapkit`, `import strapkit`; class names are unchanged), `zone_duration` &rarr; `zone_durations`, `sport_id` may be `None`, and `revoke_access()` now calls `DELETE /developer/v2/user/access`. See the [CHANGELOG](https://github.com/ponderrr/whoopyy/blob/main/CHANGELOG.md#040---2026-10-06) for the migration notes.
 
 ---
 
@@ -97,7 +99,7 @@ cd whoopyy && pip install -e .
 **3.** Run:
 
 ```python
-from whoopyy import WhoopClient
+from strapkit import WhoopClient
 
 client = WhoopClient(
     client_id="your_client_id",
@@ -125,7 +127,7 @@ graph LR
         B[AsyncWhoopClient]
     end
 
-    subgraph WhoopYY SDK
+    subgraph strapkit SDK
         A --> C[OAuthHandler]
         B --> C
         A --> D["_request()"]
@@ -153,7 +155,7 @@ graph LR
 ```mermaid
 sequenceDiagram
     participant App as Your App
-    participant SDK as WhoopYY
+    participant SDK as strapkit
     participant Browser as Browser
     participant Whoop as WHOOP OAuth
 
@@ -455,7 +457,7 @@ Same methods as `WhoopClient`, but each data call is a coroutine you `await` (an
 
 ```python
 import asyncio
-from whoopyy import AsyncWhoopClient
+from strapkit import AsyncWhoopClient
 
 async def build_dashboard():
     async with AsyncWhoopClient(client_id="...", client_secret="...") as client:
@@ -614,7 +616,7 @@ Every entity uses a `Literal` type for scoring status:
 ### CSV Export
 
 ```python
-from whoopyy import (
+from strapkit import (
     export_recovery_csv,
     export_sleep_csv,
     export_cycle_csv,
@@ -637,7 +639,7 @@ export_workout_csv(workouts, "workouts_q1.csv")
 ### Trend Analysis
 
 ```python
-from whoopyy import analyze_recovery_trends, analyze_sleep_trends, analyze_training_load
+from strapkit import analyze_recovery_trends, analyze_sleep_trends, analyze_training_load
 
 # Recovery
 trends = analyze_recovery_trends(recoveries)
@@ -656,7 +658,7 @@ if load.average_daily_steps is not None:      # None when no scored cycle has st
     print(f"Avg Steps:      {load.average_daily_steps:,.0f}")
 
 # Full report
-from whoopyy import generate_summary_report
+from strapkit import generate_summary_report
 generate_summary_report(recoveries, sleeps, cycles, workouts, output="report.txt")
 ```
 
@@ -702,7 +704,7 @@ graph TD
 ```python
 import time
 
-from whoopyy.exceptions import (
+from strapkit.exceptions import (
     WhoopError,
     WhoopRateLimitError,
     WhoopAuthError,
@@ -752,7 +754,7 @@ The SDK handles common failure modes automatically:
 
 ## Security
 
-| Concern | How WhoopYY handles it |
+| Concern | How strapkit handles it |
 |:--------|:-----------------------|
 | Token storage | `~/.whoop_tokens.json`, rewritten atomically on every save with mode `0600` (owner-only), even if the file already existed with looser permissions. A failed save leaves the previous file intact (unless the directory is not writable or the file is a mount point, where it is rewritten in place), and a symlink at the token path is refused before any token is sent |
 | Token refresh | One refresh at a time across threads, coroutines and processes (in-process lock plus `<token_file>.lock`), so two callers never spend the same rotating refresh token. If the lock file cannot be created (e.g. a read-only token directory), cross-process locking is skipped with a warning |
@@ -770,7 +772,7 @@ export WHOOP_CLIENT_SECRET="your_secret"
 
 ```python
 import os
-from whoopyy import WhoopClient
+from strapkit import WhoopClient
 
 client = WhoopClient(
     client_id=os.environ["WHOOP_CLIENT_ID"],
@@ -786,13 +788,13 @@ client = WhoopClient(
 
 ```bash
 # Setup
-git clone https://github.com/ponderrr/whoopyy.git
-cd whoopyy
+git clone https://github.com/ponderrr/whoopyy.git strapkit
+cd strapkit
 pip install -e ".[dev]"
 
 # Test
 pytest                                            # run all tests
-pytest --cov=whoopyy --cov-report=term-missing    # with coverage
+pytest --cov=strapkit --cov-report=term-missing   # with coverage
 pytest tests/test_auth.py -v                       # specific module
 
 # Type check
@@ -805,7 +807,7 @@ python -m build
 
 ### Live Check Against Your Own Account
 
-[`scripts/live_check.py`](https://github.com/ponderrr/whoopyy/blob/main/scripts/live_check.py) is a one-shot, read-only check of the SDK against your real WHOOP data. It signs in through your own developer app in your browser, calls every read endpoint once (GET only; it never calls `revoke_access()`), and validates each raw response against its whoopyy model.
+[`scripts/live_check.py`](https://github.com/ponderrr/whoopyy/blob/main/scripts/live_check.py) is a one-shot, read-only check of the SDK against your real WHOOP data. It signs in through your own developer app in your browser, calls every read endpoint once (GET only; it never calls `revoke_access()`), and validates each raw response against its strapkit model.
 
 ```bash
 pip install -e .                               # from this checkout, so the check runs against this code
@@ -826,7 +828,7 @@ Tokens go to a temporary file (never `~/.whoop_tokens.json`) that is deleted at 
 ### Project Structure
 
 ```
-whoopyy/
+strapkit/
 ├── src/
 │   ├── __init__.py          # Public API surface
 │   ├── auth.py              # OAuth 2.0 handler with token lifecycle
@@ -863,7 +865,7 @@ GPL-3.0-only. See [LICENSE](https://github.com/ponderrr/whoopyy/blob/main/LICENS
 
 <br>
 
-<sub>This is an unofficial SDK. WHOOP is a registered trademark of WHOOP, Inc.</sub>
+<sub>strapkit is an unofficial SDK. WHOOP is a trademark of WHOOP, Inc.</sub>
 
 <br>
 

@@ -1,10 +1,10 @@
 """
-WhoopYY - Complete Python SDK for Whoop API.
+strapkit - Unofficial Python SDK for the WHOOP API.
 
 A type-safe, robust Python client for accessing Whoop's developer API.
 
 Example:
-    >>> from whoopyy import WhoopClient
+    >>> from strapkit import WhoopClient
     >>> client = WhoopClient(
     ...     client_id="your_client_id",
     ...     client_secret="your_client_secret"

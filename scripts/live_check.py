@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-Read-only live check of whoopyy against your own WHOOP account.
+Read-only live check of strapkit against your own WHOOP account.
 
 Signs in to WHOOP in your browser with your own developer app, calls every
 read endpoint the SDK wraps once (GET only), and checks each raw response
-against the whoopyy model that parses it. Nothing is ever written to your
+against the strapkit model that parses it. Nothing is ever written to your
 WHOOP account: the API client refuses any request that is not a GET, and
 ``revoke_access()`` is never called.
 
@@ -96,11 +96,11 @@ import httpx
 from pydantic import AliasChoices, AliasPath, BaseModel, ValidationError
 
 try:
-    import whoopyy
-    from whoopyy import WhoopClient
-    from whoopyy.constants import ENDPOINTS, MAX_PAGE_LIMIT, SCOPES
-    from whoopyy.exceptions import WhoopError
-    from whoopyy.models import (
+    import strapkit
+    from strapkit import WhoopClient
+    from strapkit.constants import ENDPOINTS, MAX_PAGE_LIMIT, SCOPES
+    from strapkit.exceptions import WhoopError
+    from strapkit.models import (
         ActivityIdMapping,
         BodyMeasurement,
         Cycle,
@@ -115,7 +115,7 @@ try:
     )
 except ImportError:  # pragma: no cover - depends on the environment
     sys.stderr.write(
-        "live_check.py needs whoopyy to be importable. From the repository "
+        "live_check.py needs strapkit to be importable. From the repository "
         "root run:\n    pip install -e .\n"
     )
     raise SystemExit(2)
@@ -127,7 +127,7 @@ __all__ = ["main", "run_checks", "Recorder", "ReadOnlyViolation", "RequestLimitR
 # =============================================================================
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-"""Root of the whoopyy checkout this script lives in."""
+"""Root of the strapkit checkout this script lives in."""
 
 DEFAULT_OUT_PARENT = Path("~") / "Projects" / "whoop-research"
 """Parent directory of the default ``--out`` (expanded at run time)."""
@@ -487,7 +487,7 @@ class EndpointCheck:
         name: Short endpoint name used in reports and raw file names.
         sdk_call: The SDK method that is exercised.
         http: Method and path template (no IDs).
-        model: whoopyy model that parses one raw response document.
+        model: strapkit model that parses one raw response document.
         collection: Whether the endpoint is a paginated collection.
         record_key: Field that identifies a collection record (duplicate check).
         required: Whether a skip fails the check. False only for endpoints
@@ -1435,14 +1435,14 @@ def build_reports(
         counts[entry["status"]] += 1
     exit_code = EXIT_FAILED if counts[STATUS_FAIL] else EXIT_OK
     report: Dict[str, Any] = {
-        "report": "whoopyy live check: response shapes",
+        "report": "strapkit live check: response shapes",
         "schema_version": SHAPE_REPORT_VERSION,
         "privacy": (
             "Field names, JSON types, counts and value-free notes only. "
             "No IDs, names, timestamps or measurements from the account."
         ),
         "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "whoopyy_version": whoopyy.__version__,
+        "strapkit_version": strapkit.__version__,
         "python_version": platform.python_version(),
         "window_days": days,
         "summary": {
@@ -1726,7 +1726,7 @@ def check_private_path(path: Path, what: str) -> Path:
     repo = REPO_ROOT.resolve()
     if resolved == repo or repo in resolved.parents:
         raise _SetupError(
-            f"refusing {what} inside the whoopyy repository ({repo}): it would hold "
+            f"refusing {what} inside the strapkit repository ({repo}): it would hold "
             "personal health data. Choose a directory outside the repository."
         )
     root = _git_worktree_root(resolved)
@@ -1808,11 +1808,11 @@ def _finish_tokens(token_path: Path, token_dir: Optional[Path], keep: bool) -> s
 
 @contextmanager
 def _sdk_log_level(level: int) -> Iterator[None]:
-    """Temporarily set every ``whoopyy`` logger to ``level``."""
+    """Temporarily set every ``strapkit`` logger to ``level``."""
     loggers = [
         logger for name, logger in logging.Logger.manager.loggerDict.items()
         if isinstance(logger, logging.Logger)
-        and (name == "whoopyy" or name.startswith("whoopyy."))
+        and (name == "strapkit" or name.startswith("strapkit."))
     ]
     saved = [(logger, logger.level) for logger in loggers]
     for logger in loggers:
@@ -1905,9 +1905,9 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="live_check.py",
         description=(
-            "Read-only check of whoopyy against your own WHOOP account. Signs in "
+            "Read-only check of strapkit against your own WHOOP account. Signs in "
             "in your browser, GETs every read endpoint once and validates each raw "
-            "response against its whoopyy model. Needs WHOOP_CLIENT_ID and "
+            "response against its strapkit model. Needs WHOOP_CLIENT_ID and "
             "WHOOP_CLIENT_SECRET (optional WHOOP_REDIRECT_URI)."
         ),
     )
@@ -1995,14 +1995,14 @@ def main(
     with _interrupt_on_termination(), _sdk_log_level(logging.WARNING):
         try:
             if token_path is None:
-                token_dir = Path(tempfile.mkdtemp(prefix="whoopyy-live-check-"))
+                token_dir = Path(tempfile.mkdtemp(prefix="strapkit-live-check-"))
                 token_path = token_dir / "tokens.json"
 
-            package_dir = Path(whoopyy.__file__).resolve().parent
-            print("whoopyy live check (read-only)")
-            print(f"  whoopyy {whoopyy.__version__} from {package_dir}")
+            package_dir = Path(strapkit.__file__).resolve().parent
+            print("strapkit live check (read-only)")
+            print(f"  strapkit {strapkit.__version__} from {package_dir}")
             if REPO_ROOT.resolve() not in package_dir.parents:
-                print("  note: this is not the whoopyy checkout the script lives in")
+                print("  note: this is not the strapkit checkout the script lives in")
             print(f"  window: last {args.days} day(s); output: {out_dir}")
 
             client = WhoopClient(

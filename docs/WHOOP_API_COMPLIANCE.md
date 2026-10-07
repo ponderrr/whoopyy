@@ -60,7 +60,7 @@ X-RateLimit-Reset: "3"
 - `X-RateLimit-Remaining`: Requests left in closest-to-exceeded window
 - `X-RateLimit-Reset`: Seconds until closest limit resets
 
-**How WhoopYY uses them:** after a 429, the SDK waits `X-RateLimit-Reset` seconds (falling back to `Retry-After`, then 60s; capped at 120s), retries once, and then raises `WhoopRateLimitError` with `retry_after`. It logs a warning when `X-RateLimit-Remaining` is 5 or less.
+**How strapkit uses them:** after a 429, the SDK waits `X-RateLimit-Reset` seconds (falling back to `Retry-After`, then 60s; capped at 120s), retries once, and then raises `WhoopRateLimitError` with `retry_after`. It logs a warning when `X-RateLimit-Remaining` is 5 or less.
 
 ### 429 Response
 

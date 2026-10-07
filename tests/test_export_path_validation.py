@@ -6,6 +6,7 @@ by name. Everything user-side lives under tmp_path with HOME pointed at it.
 """
 
 import csv
+import io
 import os
 import sys
 from pathlib import Path
@@ -19,6 +20,7 @@ from whoopyy.export import (
     export_recovery_csv,
     export_sleep_csv,
     export_workout_csv,
+    generate_summary_report,
 )
 from whoopyy.models import Cycle, Recovery, Sleep, Workout
 
@@ -397,3 +399,74 @@ class TestOpenExportFile:
         with pytest.raises(OSError):
             _open_export_file(link)
         assert target.read_text() == "keep me"
+
+    def test_newline_argument_is_honoured(self, tmp_path):
+        with _open_export_file(tmp_path / "crlf.txt", newline="\r\n") as f:
+            f.write("a\nb")
+        assert (tmp_path / "crlf.txt").read_bytes() == b"a\r\nb"
+        with _open_export_file(tmp_path / "native.txt", newline=None) as f:
+            f.write("a\nb")
+        assert (tmp_path / "native.txt").read_bytes() == "a\nb".replace("\n", os.linesep).encode()
+
+
+class TestSummaryReportOutput:
+    """generate_summary_report(output=...) is subject to the same checks as the CSV exporters."""
+
+    @staticmethod
+    def report(output=None):
+        return generate_summary_report([], [], [], output=output)
+
+    def test_tilde_is_written_under_home(self, cwd, home):
+        text = self.report("~/report.txt")
+        assert (home / "report.txt").read_text(encoding="utf-8") == text
+        assert not (cwd / "~").exists()
+
+    def test_relative_path_is_written_relative_to_cwd(self, cwd, home):
+        text = self.report("report.txt")
+        assert (cwd / "report.txt").read_text(encoding="utf-8") == text
+        assert not (home / "report.txt").exists()
+
+    def test_path_object_and_overwrite(self, tmp_path, home):
+        (tmp_path / "report.txt").write_text("stale\n" * 500)
+        text = self.report(tmp_path / "report.txt")
+        assert (tmp_path / "report.txt").read_text(encoding="utf-8") == text
+
+    def test_symlink_to_regular_file_writes_through(self, cwd, home):
+        (cwd / "real.txt").write_text("")
+        (cwd / "link.txt").symlink_to(cwd / "real.txt")
+        text = self.report("link.txt")
+        assert (cwd / "link.txt").is_symlink()
+        assert (cwd / "real.txt").read_text(encoding="utf-8") == text
+
+    @pytest.mark.parametrize(
+        "path", ["/etc/report.txt", "/private/etc/report.txt", "/Library/report.txt",
+                 "~/.ssh/authorized_keys", "~/.zshrc", "/usr/report.txt"],
+    )
+    def test_protected_destinations_raise_before_writing(self, path, cwd, home):
+        with pytest.raises(ValueError, match="protected"):
+            self.report(path)
+        assert not (home / ".ssh").exists()
+        assert not (home / ".zshrc").exists()
+        assert list(cwd.iterdir()) == []
+
+    def test_directory_destination_raises(self, cwd, home):
+        (home / "out").mkdir()
+        with pytest.raises(ValueError, match="non-regular"):
+            self.report("~/out")
+
+    def test_file_like_object_still_works(self, cwd, home):
+        buf = io.StringIO()
+        text = self.report(buf)
+        assert buf.getvalue() == text
+        assert list(cwd.iterdir()) == []
+
+    def test_open_file_handle_still_works(self, tmp_path, cwd, home):
+        with open(tmp_path / "handle.txt", "w", encoding="utf-8") as f:
+            text = self.report(f)
+        assert (tmp_path / "handle.txt").read_text(encoding="utf-8") == text
+
+    def test_none_returns_string_and_writes_nothing(self, cwd, home):
+        text = self.report()
+        assert isinstance(text, str) and "WHOOP DATA SUMMARY REPORT" in text
+        assert list(cwd.iterdir()) == []
+        assert list(home.iterdir()) == []

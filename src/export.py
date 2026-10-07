@@ -131,17 +131,17 @@ def _validate_export_path(filepath: Union[str, Path]) -> Path:
     return resolved
 
 
-def _open_export_file(path: Path) -> TextIO:
+def _open_export_file(path: Path, newline: Optional[str] = "") -> TextIO:
     """Open a validated export path for text writing, refusing a symlink as the final component.
 
-    Equivalent to ``open(path, "w", newline="", encoding="utf-8")``, except that
+    Equivalent to ``open(path, "w", newline=newline, encoding="utf-8")``, except that
     where ``O_NOFOLLOW`` exists a symlink swapped in after validation raises
     ``OSError`` instead of being followed. Parent directories are not covered.
     """
     flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0)
     fd = os.open(path, flags, 0o666)
     try:
-        return os.fdopen(fd, "w", newline="", encoding="utf-8")
+        return os.fdopen(fd, "w", newline=newline, encoding="utf-8")
     except Exception:
         os.close(fd)
         raise
@@ -908,9 +908,14 @@ def generate_summary_report(
         cycles: List of Cycle records.
         workouts: Optional list of Workout records.
         output: Output file path or file-like object. If None, returns string.
+            A path is validated like the CSV export destinations.
     
     Returns:
         The generated report as a string.
+    
+    Raises:
+        ValueError: If ``output`` is a path in a protected location or an
+            existing non-regular file.
     
     Example:
         >>> report = generate_summary_report(
@@ -918,6 +923,9 @@ def generate_summary_report(
         ...     output="report.txt"
         ... )
     """
+    if isinstance(output, (str, Path)):
+        output = _validate_export_path(output)
+
     lines: List[str] = []
     separator = "=" * 70
     subseparator = "-" * 70
@@ -1035,7 +1043,7 @@ def generate_summary_report(
     # Output handling
     if output is not None:
         if isinstance(output, (str, Path)):
-            with open(output, "w", encoding="utf-8") as f:
+            with _open_export_file(output, newline=None) as f:
                 f.write(report)
             logger.info(f"Report saved to {output}")
         else:

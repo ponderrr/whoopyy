@@ -83,7 +83,6 @@ from .models import (
 )
 from .utils import (
     _sanitize_error_response,
-    delete_tokens,
     format_datetime,
     parse_rate_limit_reset,
 )
@@ -136,6 +135,7 @@ class WhoopClient:
         scope: Optional[List[str]] = None,
         token_file: str = DEFAULT_TOKEN_FILE,
         timeout: float = DEFAULT_TIMEOUT_SECONDS,
+        use_pkce: bool = False,
     ) -> None:
         """
         Initialize Whoop API client.
@@ -146,7 +146,10 @@ class WhoopClient:
             redirect_uri: OAuth callback URI. Must match portal configuration.
             scope: List of OAuth scopes. Defaults to all available scopes.
             token_file: Path for storing authentication tokens.
-            timeout: HTTP request timeout in seconds.
+            timeout: HTTP request timeout in seconds, for API and token
+                     requests (connecting to the API is capped at 5 seconds).
+            use_pkce: Send a PKCE (S256) challenge during authenticate().
+                      Defaults to False.
         
         Raises:
             ValueError: If client_id or client_secret is empty.
@@ -176,12 +179,17 @@ class WhoopClient:
             scope=scope,
             token_file=token_file,
             timeout=timeout,
+            use_pkce=use_pkce,
         )
         
         # HTTP client for API requests with connection pooling
         self._http_client = httpx.Client(
             base_url=API_BASE_URL,
-            timeout=httpx.Timeout(connect=5.0, read=30.0, write=10.0, pool=5.0),
+            # Honour the caller's timeout, with connecting capped at 5s. None
+            # (accepted before) removes only the read, write and pool limits.
+            timeout=httpx.Timeout(
+                timeout, connect=5.0 if timeout is None else min(5.0, timeout)
+            ),
             limits=httpx.Limits(
                 max_connections=10,
                 max_keepalive_connections=5,
@@ -206,16 +214,24 @@ class WhoopClient:
     # Authentication
     # =========================================================================
     
-    def authenticate(self, auto_open_browser: bool = True) -> None:
+    def authenticate(self, auto_open_browser: bool = True, force: bool = False) -> None:
         """
         Perform OAuth authentication flow.
         
         Opens browser for user to authorize the application. After successful
-        authorization, tokens are stored for future use.
+        authorization, tokens are stored for future use. If usable tokens
+        are already stored (an unexpired access token, or a refresh token),
+        the browser flow is skipped unless ``force`` is True.
+
+        When WHOOP rejects the stored refresh token, the SDK clears the
+        stored tokens and raises WhoopTokenError, so calling authenticate()
+        afterwards runs the browser flow again.
         
         Args:
             auto_open_browser: Whether to automatically open browser.
                               Set to False for headless environments.
+            force: Run the browser flow even if tokens are already stored,
+                   e.g. to switch accounts or re-consent to new scopes.
         
         Raises:
             WhoopAuthError: If authentication fails or is denied.
@@ -234,19 +250,28 @@ class WhoopClient:
         logger.info("Starting authentication")
         
         # Check if we already have valid tokens
-        if self.auth.has_valid_tokens():
+        if not force and self.auth.has_valid_tokens():
             logger.info("Found existing valid tokens, skipping OAuth flow")
             self._authenticated = True
             return
+
+        if force:
+            logger.info("Forced re-authentication, running OAuth flow")
         
         self.auth.authorize(auto_open_browser=auto_open_browser)
         self._authenticated = True
+        # Cached responses may belong to a previously authorized account
+        self._cache.clear()
         
         logger.info("Authentication successful")
     
     def is_authenticated(self) -> bool:
         """
         Check if client has valid authentication.
+
+        Reflects the stored tokens, not whether authenticate() was called:
+        after logout(), revoke_access() or a rejected refresh token (which
+        clears the stored tokens) this returns False.
         
         Returns:
             True if authenticated with valid (or refreshable) tokens.
@@ -255,7 +280,30 @@ class WhoopClient:
             >>> if not client.is_authenticated():
             ...     client.authenticate()
         """
-        return self._authenticated or self.auth.has_valid_tokens()
+        return self.auth.has_valid_tokens()
+
+    def logout(self) -> None:
+        """
+        Sign out locally: forget the stored tokens and cached responses.
+
+        Clears the in-memory tokens, deletes the token file at
+        ``auth.token_file`` and clears the response cache, so
+        ``is_authenticated()`` returns False and the next ``authenticate()``
+        runs the OAuth flow again. WHOOP is not contacted, so the grant stays
+        valid on WHOOP's side; use ``revoke_access()`` to revoke it remotely.
+
+        Example:
+            >>> client.logout()
+            >>> client.authenticate()  # opens the browser again
+        """
+        self._forget_session()
+        logger.info("Logged out")
+
+    def _forget_session(self) -> None:
+        """Clear stored tokens (memory and file), auth state and the cache."""
+        self.auth.clear_tokens()
+        self._authenticated = False
+        self._cache.clear()
     
     # =========================================================================
     # Internal Request Methods
@@ -305,6 +353,9 @@ class WhoopClient:
         """
         try:
             headers = self._get_auth_headers()
+            # Remember which token this request used: on a 401, refresh only
+            # if no other thread or process has replaced it already.
+            used_token = headers["Authorization"].partition(" ")[2]
             
             if logger.isEnabledFor(logging.DEBUG):
                 logger.debug(
@@ -366,9 +417,9 @@ class WhoopClient:
                         f"Status: 401. Response: {_sanitize_error_response(response.text)}",
                         status_code=401,
                     )
-                # Force refresh and retry once
+                # Refresh (unless someone already did) and retry once
                 logger.warning("Authentication failed - refreshing token and retrying")
-                self.auth.refresh_access_token()
+                self.auth.refresh_if_stale(used_token)
                 return self._request(method, endpoint, params=params, data=data, _retry=True)
 
             # Handle not found errors
@@ -1343,13 +1394,10 @@ class WhoopClient:
 
         self._request("DELETE", ENDPOINTS["user_access"])
 
-        self.auth._tokens = None
-        self._authenticated = False
         # The revoked tokens would otherwise be reloaded from disk by
         # has_valid_tokens()/get_valid_token(), and cached responses belong
         # to the user who just revoked access.
-        delete_tokens(str(self.auth.token_file))
-        self._cache.clear()
+        self._forget_session()
 
         logger.info("Access token revoked")
 

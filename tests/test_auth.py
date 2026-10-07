@@ -17,13 +17,54 @@ from unittest.mock import Mock, patch, MagicMock
 import pytest
 import httpx
 
-from whoopyy.auth import (
-    OAuthHandler,
-    _CallbackHandler,
-    _reset_callback_handler,
-)
+from whoopyy.auth import OAuthHandler, _CallbackServer
 from whoopyy.exceptions import WhoopAuthError, WhoopTokenError
 from whoopyy.constants import OAUTH_AUTHORIZE_URL, OAUTH_TOKEN_URL, SCOPES
+
+
+@pytest.fixture(autouse=True)
+def _isolate_default_token_file(tmp_path, monkeypatch):
+    """
+    Redirect the default token file (~/.whoop_tokens.json) to a temp path.
+
+    Refreshes re-read the token file and lock "<file>.lock" next to it, so a
+    handler built with the default token_file would otherwise read, lock or
+    delete the developer's real tokens.
+    """
+    import os
+
+    import whoopyy.auth as auth_module
+    from whoopyy.constants import DEFAULT_TOKEN_FILE
+
+    safe_path = str(tmp_path / "default_whoop_tokens.json")
+    default_path = os.path.abspath(DEFAULT_TOKEN_FILE)
+
+    def _safe(filepath):
+        if os.path.abspath(os.fspath(filepath)) == default_path:
+            return safe_path
+        return filepath
+
+    def _redirect_path_arg(func):
+        def wrapper(filepath=DEFAULT_TOKEN_FILE, *args, **kwargs):
+            return func(_safe(filepath), *args, **kwargs)
+        return wrapper
+
+    for name in (
+        "load_tokens",
+        "delete_tokens",
+        "token_file_lock",
+        "async_token_file_lock",
+        "_check_token_file_writable",
+        "_file_lock_held_by_current_thread",
+    ):
+        monkeypatch.setattr(auth_module, name, _redirect_path_arg(getattr(auth_module, name)))
+
+    original_save = auth_module.save_tokens
+
+    def _save(tokens, filepath=DEFAULT_TOKEN_FILE):
+        return original_save(tokens, _safe(filepath))
+
+    monkeypatch.setattr(auth_module, "save_tokens", _save)
 
 
 # =============================================================================
@@ -31,12 +72,13 @@ from whoopyy.constants import OAUTH_AUTHORIZE_URL, OAUTH_TOKEN_URL, SCOPES
 # =============================================================================
 
 @pytest.fixture
-def oauth_handler():
-    """Create an OAuth handler for testing."""
+def oauth_handler(tmp_path):
+    """Create an OAuth handler for testing (token file in a temp dir)."""
     handler = OAuthHandler(
         client_id="test_client_id",
         client_secret="test_client_secret",
         redirect_uri="http://localhost:8080/callback",
+        token_file=str(tmp_path / "tokens.json"),
     )
     yield handler
     handler.close()
@@ -485,20 +527,32 @@ class TestTokenManagement:
 # =============================================================================
 
 class TestCallbackHandler:
-    """Tests for OAuth callback handler."""
+    """Tests for OAuth callback handler state."""
     
-    def test_reset_callback_handler(self) -> None:
-        """Test resetting callback handler state."""
-        # Set some values
-        _CallbackHandler.auth_code = "test_code"
-        _CallbackHandler.auth_state = "test_state"
-        _CallbackHandler.error = "test_error"
-        
-        _reset_callback_handler()
-        
-        assert _CallbackHandler.auth_code is None
-        assert _CallbackHandler.auth_state is None
-        assert _CallbackHandler.error is None
+    def test_each_callback_server_has_its_own_result(self) -> None:
+        """Callback results live on the server instance, not on a shared class."""
+        import socket
+
+        servers = [
+            _CallbackServer(
+                ("127.0.0.1", 0),
+                address_family=socket.AF_INET,
+                expected_state="state",
+                callback_path="/callback",
+                socket_timeout=1.0,
+            )
+            for _ in range(2)
+        ]
+        try:
+            servers[0].record_result(code="test_code", error=None, error_description=None)
+
+            assert servers[0].auth_code == "test_code"
+            assert servers[0].result_ready.is_set()
+            assert servers[1].auth_code is None
+            assert not servers[1].result_ready.is_set()
+        finally:
+            for server in servers:
+                server.server_close()
 
 
 # =============================================================================
@@ -718,30 +772,29 @@ def test_token_file_permissions(tmp_path):
     assert mode == "0o600"
 
 
-def test_callback_timeout_raises():
-    """If no callback received, WhoopAuthError should be raised."""
-    from unittest.mock import patch, MagicMock
-    from whoopyy.auth import OAuthHandler, _CallbackHandler
+def test_callback_timeout_raises(monkeypatch, tmp_path):
+    """If no callback received before the deadline, WhoopAuthError should be raised."""
+    import socket
+
+    import whoopyy.auth as auth_module
+    from whoopyy.auth import OAuthHandler
     from whoopyy.exceptions import WhoopAuthError
 
+    probe = socket.socket()
+    probe.bind(("127.0.0.1", 0))
+    port = probe.getsockname()[1]
+    probe.close()
+
+    monkeypatch.setattr(auth_module, "CALLBACK_TIMEOUT_SECONDS", 0.2)
     handler = OAuthHandler(
         client_id="test_client_id",
         client_secret="test_client_secret",
+        redirect_uri=f"http://localhost:{port}/callback",
+        token_file=str(tmp_path / "tokens.json"),
     )
 
-    # Simulate handle_request returning without setting auth_code (timeout)
-    def fake_handle_request():
-        # Do not set _CallbackHandler.auth_code — simulates timeout
-        pass
-
-    mock_server = MagicMock()
-    mock_server.handle_request.side_effect = fake_handle_request
-
-    with patch("whoopyy.auth._CallbackHandler.auth_code", None), \
-         patch("whoopyy.auth._CallbackHandler.error", None), \
-         patch("whoopyy.auth.HTTPServer", return_value=mock_server):
-        with pytest.raises(WhoopAuthError, match="timed out"):
-            handler._wait_for_callback("some_state")
+    with pytest.raises(WhoopAuthError, match="timed out after 0.2 seconds"):
+        handler._wait_for_callback("some_state")
 
     handler.close()
 

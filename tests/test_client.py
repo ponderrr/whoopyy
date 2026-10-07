@@ -47,6 +47,51 @@ from whoopyy.exceptions import (
 from whoopyy.utils import save_tokens
 
 
+@pytest.fixture(autouse=True)
+def _isolate_default_token_file(tmp_path, monkeypatch):
+    """
+    Redirect the default token file (~/.whoop_tokens.json) to a temp path.
+
+    Refreshes re-read the token file and lock "<file>.lock" next to it, so a
+    handler built with the default token_file would otherwise read, lock or
+    delete the developer's real tokens.
+    """
+    import os
+
+    import whoopyy.auth as auth_module
+    from whoopyy.constants import DEFAULT_TOKEN_FILE
+
+    safe_path = str(tmp_path / "default_whoop_tokens.json")
+    default_path = os.path.abspath(DEFAULT_TOKEN_FILE)
+
+    def _safe(filepath):
+        if os.path.abspath(os.fspath(filepath)) == default_path:
+            return safe_path
+        return filepath
+
+    def _redirect_path_arg(func):
+        def wrapper(filepath=DEFAULT_TOKEN_FILE, *args, **kwargs):
+            return func(_safe(filepath), *args, **kwargs)
+        return wrapper
+
+    for name in (
+        "load_tokens",
+        "delete_tokens",
+        "token_file_lock",
+        "async_token_file_lock",
+        "_check_token_file_writable",
+        "_file_lock_held_by_current_thread",
+    ):
+        monkeypatch.setattr(auth_module, name, _redirect_path_arg(getattr(auth_module, name)))
+
+    original_save = auth_module.save_tokens
+
+    def _save(tokens, filepath=DEFAULT_TOKEN_FILE):
+        return original_save(tokens, _safe(filepath))
+
+    monkeypatch.setattr(auth_module, "save_tokens", _save)
+
+
 # =============================================================================
 # Fixtures
 # =============================================================================
@@ -76,8 +121,16 @@ def mock_auth(tmp_path):
     auth = Mock()
     auth.token_file = str(tmp_path / ".whoop_tokens.json")
     auth.get_valid_token.return_value = "test_access_token"
+    auth.refresh_if_stale.return_value = "refreshed_access_token"
     auth.has_valid_tokens.return_value = True
     auth.close = Mock()
+
+    def _clear_tokens():
+        # Mirrors OAuthHandler.clear_tokens(): memory and file
+        auth._tokens = None
+        Path(auth.token_file).unlink(missing_ok=True)
+
+    auth.clear_tokens.side_effect = _clear_tokens
     return auth
 
 
@@ -281,8 +334,6 @@ class TestRequest:
         mock_response_401.status_code = 401
         mock_response_401.text = "Unauthorized"
 
-        mock_auth.refresh_access_token = Mock()
-
         with patch.object(
             client._http_client,
             "request",
@@ -292,7 +343,9 @@ class TestRequest:
                 client._request("GET", "/test")
 
             assert exc.value.status_code == 401
-            mock_auth.refresh_access_token.assert_called_once()
+            # The stale-aware refresh gets the token the request used
+            mock_auth.refresh_if_stale.assert_called_once_with("test_access_token")
+            mock_auth.refresh_access_token.assert_not_called()
     
     def test_request_validation_error_handling(self, client) -> None:
         """Test validation error (400) handling."""
@@ -362,8 +415,6 @@ class TestRequest:
         mock_200.json.return_value = {"ok": True}
         mock_200.raise_for_status = Mock()
 
-        mock_auth.refresh_access_token = Mock()
-
         with patch.object(
             client._http_client,
             "request",
@@ -372,15 +423,14 @@ class TestRequest:
             result = client._request("GET", "/test")
 
         assert result == {"ok": True}
-        mock_auth.refresh_access_token.assert_called_once()
+        mock_auth.refresh_if_stale.assert_called_once_with("test_access_token")
+        mock_auth.refresh_access_token.assert_not_called()
 
     def test_401_double_triggers_raises_auth_error(self, client, mock_auth) -> None:
         """Test that two consecutive 401s raises WhoopAuthError after one refresh."""
         mock_401 = Mock()
         mock_401.status_code = 401
         mock_401.text = "Unauthorized"
-
-        mock_auth.refresh_access_token = Mock()
 
         with patch.object(
             client._http_client,
@@ -390,7 +440,7 @@ class TestRequest:
             with pytest.raises(WhoopAuthError):
                 client._request("GET", "/test")
 
-        mock_auth.refresh_access_token.assert_called_once()
+        mock_auth.refresh_if_stale.assert_called_once()
 
     def test_is_retryable_error_true_for_network_error(self, client) -> None:
         """Test that is_retryable_error returns True for WhoopNetworkError."""
@@ -941,7 +991,6 @@ class TestRevokeAccess:
     def test_revoke_access_repeated_401_raises_auth_error(self, client, mock_auth) -> None:
         """Two 401s (before and after refresh) raise WhoopAuthError; tokens are kept."""
         mock_auth._tokens = {"access_token": "test_access_token"}
-        mock_auth.refresh_access_token = Mock()
 
         with patch.object(
             client._http_client, "request", return_value=self._response(401, "unauthorized")
@@ -950,14 +999,13 @@ class TestRevokeAccess:
                 client.revoke_access()
 
         assert exc_info.value.status_code == 401
-        mock_auth.refresh_access_token.assert_called_once()
+        mock_auth.refresh_if_stale.assert_called_once_with("test_access_token")
         assert mock_request.call_count == 2
         assert mock_auth._tokens == {"access_token": "test_access_token"}
 
     def test_revoke_access_401_then_204_succeeds(self, client, mock_auth) -> None:
         """A 401 triggers one token refresh; a 204 on retry completes the revoke."""
         mock_auth._tokens = {"access_token": "test_access_token"}
-        mock_auth.refresh_access_token = Mock()
 
         with patch.object(
             client._http_client,
@@ -966,7 +1014,7 @@ class TestRevokeAccess:
         ):
             client.revoke_access()
 
-        mock_auth.refresh_access_token.assert_called_once()
+        mock_auth.refresh_if_stale.assert_called_once_with("test_access_token")
         assert mock_auth._tokens is None
         assert client._authenticated is False
 

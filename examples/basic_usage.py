@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Basic usage example for WhoopYY SDK.
+Basic usage example for the strapkit SDK.
 
 Demonstrates:
 - Authentication with OAuth
@@ -28,8 +28,8 @@ from dotenv import load_dotenv
 # Load environment variables from .env file
 load_dotenv()
 
-# Import WhoopYY
-from whoopyy import WhoopClient
+# Import strapkit
+from strapkit import WhoopClient
 
 
 def main() -> None:
@@ -45,7 +45,7 @@ def main() -> None:
         sys.exit(1)
     
     print("=" * 60)
-    print("WhoopYY Basic Usage Example")
+    print("strapkit Basic Usage Example")
     print("=" * 60)
     
     # Use context manager for automatic cleanup
@@ -130,7 +130,8 @@ def main() -> None:
             if workout_collection.records:
                 for workout in workout_collection.records:
                     if workout.score:
-                        sport = workout.sport_name
+                        # sport_name is always present in v2; sport_id is deprecated
+                        sport = workout.sport_display_name
                         strain = workout.score.strain
                         duration = workout.duration_minutes or 0
                         

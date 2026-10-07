@@ -11,14 +11,19 @@ Tests cover:
 """
 
 import time
+import uuid
 from datetime import datetime, date, timezone
+from pathlib import Path
 from unittest.mock import Mock, patch, MagicMock
 
 import pytest
 import httpx
 
-from whoopyy.client import WhoopClient
-from whoopyy.models import (
+import strapkit
+from strapkit.client import WhoopClient
+from strapkit.constants import API_BASE_URL, ENDPOINTS
+from strapkit.models import (
+    ActivityIdMapping,
     UserProfileBasic,
     BodyMeasurement,
     Recovery,
@@ -31,7 +36,7 @@ from whoopyy.models import (
     Workout,
     WorkoutCollection,
 )
-from whoopyy.exceptions import (
+from strapkit.exceptions import (
     WhoopAPIError,
     WhoopAuthError,
     WhoopNetworkError,
@@ -40,26 +45,100 @@ from whoopyy.exceptions import (
     WhoopValidationError,
     is_retryable_error,
 )
+from strapkit.utils import save_tokens
+
+
+@pytest.fixture(autouse=True)
+def _isolate_default_token_file(tmp_path, monkeypatch):
+    """
+    Redirect the default token file (~/.whoop_tokens.json) to a temp path.
+
+    Refreshes re-read the token file and lock "<file>.lock" next to it, so a
+    handler built with the default token_file would otherwise read, lock or
+    delete the developer's real tokens.
+    """
+    import os
+
+    import strapkit.auth as auth_module
+    from strapkit.constants import DEFAULT_TOKEN_FILE
+
+    safe_path = str(tmp_path / "default_whoop_tokens.json")
+    default_path = os.path.abspath(DEFAULT_TOKEN_FILE)
+
+    def _safe(filepath):
+        if os.path.abspath(os.fspath(filepath)) == default_path:
+            return safe_path
+        return filepath
+
+    def _redirect_path_arg(func):
+        def wrapper(filepath=DEFAULT_TOKEN_FILE, *args, **kwargs):
+            return func(_safe(filepath), *args, **kwargs)
+        return wrapper
+
+    for name in (
+        "load_tokens",
+        "delete_tokens",
+        "token_file_lock",
+        "async_token_file_lock",
+        "_check_token_file_writable",
+        "_file_lock_held_by_current_thread",
+    ):
+        monkeypatch.setattr(auth_module, name, _redirect_path_arg(getattr(auth_module, name)))
+
+    original_save = auth_module.save_tokens
+
+    def _save(tokens, filepath=DEFAULT_TOKEN_FILE):
+        return original_save(tokens, _safe(filepath))
+
+    monkeypatch.setattr(auth_module, "save_tokens", _save)
 
 
 # =============================================================================
 # Fixtures
 # =============================================================================
 
+def _install_mock_transport(client, handler) -> None:
+    """Route the client's HTTP traffic through an httpx.MockTransport handler."""
+    client._http_client.close()
+    client._http_client = httpx.Client(
+        base_url=API_BASE_URL,
+        transport=httpx.MockTransport(handler),
+    )
+
+
+def _json_response(payload, status_code: int = 200) -> Mock:
+    """Build a mock successful JSON response."""
+    mock_response = Mock()
+    mock_response.status_code = status_code
+    mock_response.headers = {}
+    mock_response.json.return_value = payload
+    mock_response.raise_for_status = Mock()
+    return mock_response
+
+
 @pytest.fixture
-def mock_auth():
+def mock_auth(tmp_path):
     """Create a mock OAuth handler."""
     auth = Mock()
+    auth.token_file = str(tmp_path / ".whoop_tokens.json")
     auth.get_valid_token.return_value = "test_access_token"
+    auth.refresh_if_stale.return_value = "refreshed_access_token"
     auth.has_valid_tokens.return_value = True
     auth.close = Mock()
+
+    def _clear_tokens():
+        # Mirrors OAuthHandler.clear_tokens(): memory and file
+        auth._tokens = None
+        Path(auth.token_file).unlink(missing_ok=True)
+
+    auth.clear_tokens.side_effect = _clear_tokens
     return auth
 
 
 @pytest.fixture
 def client(mock_auth):
     """Create a WhoopClient with mocked auth."""
-    with patch("whoopyy.client.OAuthHandler", return_value=mock_auth):
+    with patch("strapkit.client.OAuthHandler", return_value=mock_auth):
         c = WhoopClient(
             client_id="test_client_id",
             client_secret="test_client_secret",
@@ -147,7 +226,7 @@ class TestWhoopClientInit:
     
     def test_valid_initialization(self, mock_auth) -> None:
         """Test creating client with valid parameters."""
-        with patch("whoopyy.client.OAuthHandler", return_value=mock_auth):
+        with patch("strapkit.client.OAuthHandler", return_value=mock_auth):
             client = WhoopClient(
                 client_id="test_id",
                 client_secret="test_secret",
@@ -156,6 +235,7 @@ class TestWhoopClientInit:
             assert client.client_id == "test_id"
             assert client.client_secret == "test_secret"
             assert client._authenticated is False
+            assert client._http_client.headers["User-Agent"] == f"strapkit/{strapkit.__version__}"
             
             client.close()
     
@@ -231,29 +311,30 @@ class TestRequest:
             assert "Bearer test_access_token" in call_kwargs["headers"]["Authorization"]
     
     def test_request_rate_limit_handling(self, client) -> None:
-        """Test rate limit (429) handling."""
+        """Test rate limit (429) handling: one wait from the headers, one retry, then raise."""
         mock_response = Mock()
         mock_response.status_code = 429
         mock_response.headers = {"Retry-After": "60"}
-        
+
         with patch.object(
             client._http_client,
             "request",
             return_value=mock_response
-        ):
+        ) as mock_request, patch("strapkit.client.time.sleep") as mock_sleep:
             with pytest.raises(WhoopRateLimitError) as exc:
                 client._request("GET", "/test")
-            
+
             assert exc.value.retry_after == 60
             assert exc.value.status_code == 429
+            # Slept exactly once, for the Retry-After value, then retried once
+            mock_sleep.assert_called_once_with(60)
+            assert mock_request.call_count == 2
     
     def test_request_auth_error_handling(self, client, mock_auth) -> None:
         """Test authentication error (401) triggers refresh and retry; second 401 raises WhoopAuthError."""
         mock_response_401 = Mock()
         mock_response_401.status_code = 401
         mock_response_401.text = "Unauthorized"
-
-        mock_auth.refresh_access_token = Mock()
 
         with patch.object(
             client._http_client,
@@ -264,7 +345,9 @@ class TestRequest:
                 client._request("GET", "/test")
 
             assert exc.value.status_code == 401
-            mock_auth.refresh_access_token.assert_called_once()
+            # The stale-aware refresh gets the token the request used
+            mock_auth.refresh_if_stale.assert_called_once_with("test_access_token")
+            mock_auth.refresh_access_token.assert_not_called()
     
     def test_request_validation_error_handling(self, client) -> None:
         """Test validation error (400) handling."""
@@ -334,8 +417,6 @@ class TestRequest:
         mock_200.json.return_value = {"ok": True}
         mock_200.raise_for_status = Mock()
 
-        mock_auth.refresh_access_token = Mock()
-
         with patch.object(
             client._http_client,
             "request",
@@ -344,15 +425,14 @@ class TestRequest:
             result = client._request("GET", "/test")
 
         assert result == {"ok": True}
-        mock_auth.refresh_access_token.assert_called_once()
+        mock_auth.refresh_if_stale.assert_called_once_with("test_access_token")
+        mock_auth.refresh_access_token.assert_not_called()
 
     def test_401_double_triggers_raises_auth_error(self, client, mock_auth) -> None:
         """Test that two consecutive 401s raises WhoopAuthError after one refresh."""
         mock_401 = Mock()
         mock_401.status_code = 401
         mock_401.text = "Unauthorized"
-
-        mock_auth.refresh_access_token = Mock()
 
         with patch.object(
             client._http_client,
@@ -362,7 +442,7 @@ class TestRequest:
             with pytest.raises(WhoopAuthError):
                 client._request("GET", "/test")
 
-        mock_auth.refresh_access_token.assert_called_once()
+        mock_auth.refresh_if_stale.assert_called_once()
 
     def test_is_retryable_error_true_for_network_error(self, client) -> None:
         """Test that is_retryable_error returns True for WhoopNetworkError."""
@@ -728,6 +808,7 @@ class TestWorkoutMethods:
             "start": "2024-01-15T10:00:00.000Z",
             "end": "2024-01-15T11:00:00.000Z",
             "timezone_offset": "-05:00",
+            "sport_name": "running",
             "sport_id": 0,
             "score_state": "SCORED",
             "score": None,
@@ -738,12 +819,17 @@ class TestWorkoutMethods:
             client._http_client,
             "request",
             return_value=mock_response
-        ):
-            workout = client.get_workout("abc-workout-uuid")
+        ) as mock_request:
+            workout = client.get_workout("a1b2c3d4-e5f6-7890-abcd-ef1234567890")
 
             assert isinstance(workout, Workout)
             assert workout.id == "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
-            assert workout.sport_display_name == "Running"
+            assert workout.sport_name == "running"
+            assert workout.sport_id == 0
+            assert mock_request.call_args.kwargs["method"] == "GET"
+            assert mock_request.call_args.kwargs["url"] == (
+                "/developer/v2/activity/workout/a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+            )
 
     def test_get_workout_accepts_uuid_string(self, client) -> None:
         """Test get_workout accepts a UUID string and makes HTTP call."""
@@ -757,7 +843,7 @@ class TestWorkoutMethods:
             "start": "2024-01-15T10:00:00.000Z",
             "end": "2024-01-15T11:00:00.000Z",
             "timezone_offset": "-05:00",
-            "sport_id": 0,
+            "sport_name": "running",
             "score_state": "SCORED",
             "score": None,
         }
@@ -790,7 +876,7 @@ class TestContextManager:
     
     def test_context_manager_closes_resources(self, mock_auth) -> None:
         """Test that context manager closes all resources."""
-        with patch("whoopyy.client.OAuthHandler", return_value=mock_auth):
+        with patch("strapkit.client.OAuthHandler", return_value=mock_auth):
             with WhoopClient(
                 client_id="test_id",
                 client_secret="test_secret",
@@ -825,47 +911,211 @@ class TestRepr:
 # =============================================================================
 
 class TestRevokeAccess:
-    """Tests for revoke_access() method."""
+    """Tests for revoke_access() (DELETE /developer/v2/user/access)."""
 
-    def test_revoke_access_sends_post(self, client, mock_auth) -> None:
-        """Test that revoke_access() POSTs to the correct OAuth revocation URL."""
-        mock_response = Mock()
-        mock_response.status_code = 200
+    @staticmethod
+    def _response(status_code: int, text: str = "") -> httpx.Response:
+        """Build a real httpx response for the revoke request."""
+        return httpx.Response(
+            status_code,
+            text=text,
+            request=httpx.Request("DELETE", f"{API_BASE_URL}{ENDPOINTS['user_access']}"),
+        )
 
-        with patch.object(client._http_client, "post", return_value=mock_response) as mock_post:
+    def test_revoke_access_sends_delete_to_user_access(self, client, mock_auth) -> None:
+        """revoke_access() sends DELETE /developer/v2/user/access with the Bearer token."""
+        with patch.object(
+            client._http_client, "request", return_value=self._response(204)
+        ) as mock_request:
             client.revoke_access()
 
-        mock_post.assert_called_once()
-        call_args = mock_post.call_args
-        url = call_args[0][0] if call_args[0] else call_args[1].get("url", call_args[0][0])
-        # First positional argument is the URL
-        assert "/oauth/oauth2/revoke" in call_args[0][0]
+        mock_request.assert_called_once()
+        call_kwargs = mock_request.call_args.kwargs
+        assert call_kwargs["method"] == "DELETE"
+        assert call_kwargs["url"] == "/developer/v2/user/access"
+        assert call_kwargs["headers"]["Authorization"] == "Bearer test_access_token"
+        assert call_kwargs["json"] is None
+
+    def test_revoke_access_does_not_post_to_oauth_revoke(self, client, mock_auth) -> None:
+        """The retired POST /oauth/oauth2/revoke call is no longer made."""
+        with patch.object(
+            client._http_client, "request", return_value=self._response(204)
+        ), patch.object(client._http_client, "post") as mock_post:
+            client.revoke_access()
+
+        mock_post.assert_not_called()
+
+    def test_revoke_access_204_returns_none(self, client, mock_auth) -> None:
+        """A 204 No Content response is success; revoke_access() returns None."""
+        with patch.object(client._http_client, "request", return_value=self._response(204)):
+            assert client.revoke_access() is None
 
     def test_revoke_access_clears_tokens(self, client, mock_auth) -> None:
-        """Test that revoke_access() clears stored tokens on success."""
-        mock_response = Mock()
-        mock_response.status_code = 200
-
-        # Give auth handler some tokens to be cleared
+        """revoke_access() clears in-memory tokens and marks the client unauthenticated."""
         mock_auth._tokens = {"access_token": "test_access_token"}
+        client._authenticated = True
 
-        with patch.object(client._http_client, "post", return_value=mock_response):
+        with patch.object(client._http_client, "request", return_value=self._response(204)):
             client.revoke_access()
 
         assert mock_auth._tokens is None
         assert client._authenticated is False
 
-    def test_revoke_access_raises_on_error(self, client, mock_auth) -> None:
-        """Test that revoke_access() raises WhoopAuthError on non-200 response."""
-        mock_response = Mock()
-        mock_response.status_code = 400
-        mock_response.text = "invalid_token"
+    def test_revoke_access_400_raises_validation_error(self, client, mock_auth) -> None:
+        """A 400 surfaces as WhoopValidationError and leaves tokens untouched."""
+        mock_auth._tokens = {"access_token": "test_access_token"}
+        client._authenticated = True
 
-        with patch.object(client._http_client, "post", return_value=mock_response):
-            with pytest.raises(WhoopAuthError) as exc_info:
+        with patch.object(
+            client._http_client, "request", return_value=self._response(400, "bad request")
+        ):
+            with pytest.raises(WhoopValidationError) as exc_info:
                 client.revoke_access()
 
         assert exc_info.value.status_code == 400
+        assert mock_auth._tokens == {"access_token": "test_access_token"}
+        assert client._authenticated is True
+
+    def test_revoke_access_500_raises_api_error(self, client, mock_auth) -> None:
+        """A 500 surfaces as WhoopAPIError and leaves tokens untouched."""
+        mock_auth._tokens = {"access_token": "test_access_token"}
+
+        with patch.object(
+            client._http_client, "request", return_value=self._response(500, "server error")
+        ):
+            with pytest.raises(WhoopAPIError) as exc_info:
+                client.revoke_access()
+
+        assert exc_info.value.status_code == 500
+        assert not isinstance(exc_info.value, WhoopAuthError)
+        assert mock_auth._tokens == {"access_token": "test_access_token"}
+
+    def test_revoke_access_repeated_401_raises_auth_error(self, client, mock_auth) -> None:
+        """Two 401s (before and after refresh) raise WhoopAuthError; tokens are kept."""
+        mock_auth._tokens = {"access_token": "test_access_token"}
+
+        with patch.object(
+            client._http_client, "request", return_value=self._response(401, "unauthorized")
+        ) as mock_request:
+            with pytest.raises(WhoopAuthError) as exc_info:
+                client.revoke_access()
+
+        assert exc_info.value.status_code == 401
+        mock_auth.refresh_if_stale.assert_called_once_with("test_access_token")
+        assert mock_request.call_count == 2
+        assert mock_auth._tokens == {"access_token": "test_access_token"}
+
+    def test_revoke_access_401_then_204_succeeds(self, client, mock_auth) -> None:
+        """A 401 triggers one token refresh; a 204 on retry completes the revoke."""
+        mock_auth._tokens = {"access_token": "test_access_token"}
+
+        with patch.object(
+            client._http_client,
+            "request",
+            side_effect=[self._response(401, "unauthorized"), self._response(204)],
+        ):
+            client.revoke_access()
+
+        mock_auth.refresh_if_stale.assert_called_once_with("test_access_token")
+        assert mock_auth._tokens is None
+        assert client._authenticated is False
+
+    def test_revoke_access_over_http_transport(self, client, mock_auth) -> None:
+        """End to end through httpx: full URL, method and Authorization header."""
+        seen = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            seen.append(request)
+            return httpx.Response(204)
+
+        _install_mock_transport(client, handler)
+        client.revoke_access()
+
+        assert len(seen) == 1
+        assert seen[0].method == "DELETE"
+        assert str(seen[0].url) == "https://api.prod.whoop.com/developer/v2/user/access"
+        assert seen[0].headers["Authorization"] == "Bearer test_access_token"
+        assert client._authenticated is False
+
+    def test_revoke_access_deletes_token_file_and_clears_cache(self, client, mock_auth) -> None:
+        """A successful revoke removes the token file and the response cache."""
+        token_path = Path(mock_auth.token_file)
+        token_path.write_text("{}")
+        client._cache_set("profile_basic", object(), ttl=300)
+
+        with patch.object(client._http_client, "request", return_value=self._response(204)):
+            client.revoke_access()
+
+        assert not token_path.exists()
+        assert client._cache == {}
+
+    def test_revoke_access_failure_keeps_token_file_and_cache(self, client, mock_auth) -> None:
+        """A failed revoke leaves the token file and the cache in place."""
+        token_path = Path(mock_auth.token_file)
+        token_path.write_text("{}")
+        client._cache_set("profile_basic", object(), ttl=300)
+
+        with patch.object(
+            client._http_client, "request", return_value=self._response(500, "server error")
+        ):
+            with pytest.raises(WhoopAPIError):
+                client.revoke_access()
+
+        assert token_path.exists()
+        assert "profile_basic" in client._cache
+
+    def test_revoke_access_signs_out_with_real_token_file(self, tmp_path) -> None:
+        """After a revoke the client is unauthenticated and does not reuse the old token."""
+        token_file = str(tmp_path / ".whoop_tokens.json")
+        save_tokens(
+            {
+                "access_token": "AT",
+                "refresh_token": "RT",
+                "expires_in": 3600,
+                "expires_at": time.time() + 3600,
+                "token_type": "Bearer",
+                "scope": "read:profile",
+            },
+            token_file,
+        )
+        profile = {
+            "user_id": 1,
+            "email": "a@example.com",
+            "first_name": "A",
+            "last_name": "B",
+        }
+        seen = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            seen.append((request.method, request.url.path, request.headers["Authorization"]))
+            if request.method == "DELETE":
+                return httpx.Response(204)
+            return httpx.Response(200, json=profile)
+
+        client = WhoopClient(
+            client_id="test_client_id",
+            client_secret="test_client_secret",
+            token_file=token_file,
+        )
+        try:
+            _install_mock_transport(client, handler)
+            client.get_profile_basic()
+            assert client.is_authenticated() is True
+
+            client.revoke_access()
+
+            assert client.is_authenticated() is False
+            assert not Path(token_file).exists()
+            with patch.object(client.auth, "authorize") as mock_authorize:
+                client.authenticate(auto_open_browser=False)
+            mock_authorize.assert_called_once_with(auto_open_browser=False)
+        finally:
+            client.close()
+
+        assert seen == [
+            ("GET", "/developer/v2/user/profile/basic", "Bearer AT"),
+            ("DELETE", "/developer/v2/user/access", "Bearer AT"),
+        ]
 
 
 # =============================================================================
@@ -1030,7 +1280,7 @@ class TestWorkoutPagination:
             "start": "2024-01-15T10:00:00.000Z",
             "end": "2024-01-15T11:00:00.000Z",
             "timezone_offset": "-05:00",
-            "sport_id": 44,
+            "sport_name": "yoga",
             "score_state": "SCORED",
             "score": None,
         }
@@ -1051,8 +1301,9 @@ class TestWorkoutPagination:
 
         assert isinstance(collection, WorkoutCollection)
         assert len(collection.records) == 3
-        # sport_id=44 → Yoga
-        assert all(w.sport_display_name == "Yoga" for w in collection.records)
+        # v2 identifies the sport by name; the deprecated sport_id is absent
+        assert all(w.sport_name == "yoga" for w in collection.records)
+        assert all(w.sport_id is None for w in collection.records)
 
     def test_get_all_workouts_multi_page(self, client):
         """get_all_workouts fetches two pages and returns combined list."""
@@ -1134,7 +1385,7 @@ class TestIterators:
             "start": "2024-01-15T10:00:00.000Z",
             "end": "2024-01-15T11:00:00.000Z",
             "timezone_offset": "-05:00",
-            "sport_id": 44,
+            "sport_name": "yoga",
             "score_state": "SCORED",
             "score": None,
         }
@@ -1252,9 +1503,455 @@ class TestHTTPConnectionPooling:
 
     def test_client_closes_session_on_exit(self, mock_auth):
         """Session should be closed after context manager exit."""
-        with patch("whoopyy.client.OAuthHandler", return_value=mock_auth):
+        with patch("strapkit.client.OAuthHandler", return_value=mock_auth):
             with WhoopClient(
                 client_id="test_id", client_secret="test_secret"
             ) as c:
                 session = c._http_client
             assert session.is_closed
+
+
+# =============================================================================
+# Rate Limit Header Tests (WHOOP v2: X-RateLimit-Reset)
+# =============================================================================
+
+class TestRateLimitHeaders:
+    """429 handling waits for the time given by WHOOP's rate limit headers."""
+
+    @staticmethod
+    def _rate_limited(headers) -> Mock:
+        mock_response = Mock()
+        mock_response.status_code = 429
+        mock_response.headers = headers
+        mock_response.text = "Too Many Requests"
+        return mock_response
+
+    def test_waits_for_x_ratelimit_reset_then_retries(self, client) -> None:
+        """A 429 with X-RateLimit-Reset sleeps that long and retries once."""
+        responses = [
+            self._rate_limited({"X-RateLimit-Reset": "7"}),
+            _json_response({"ok": True}),
+        ]
+        with patch.object(
+            client._http_client, "request", side_effect=responses
+        ) as mock_request, patch("strapkit.client.time.sleep") as mock_sleep:
+            result = client._request("GET", "/test")
+
+        assert result == {"ok": True}
+        mock_sleep.assert_called_once_with(7)
+        assert mock_request.call_count == 2
+
+    def test_x_ratelimit_reset_preferred_over_retry_after(self, client) -> None:
+        """X-RateLimit-Reset wins over Retry-After, for the wait and the error."""
+        response = self._rate_limited({"Retry-After": "30", "X-RateLimit-Reset": "7"})
+        with patch.object(client._http_client, "request", return_value=response), \
+                patch("strapkit.client.time.sleep") as mock_sleep:
+            with pytest.raises(WhoopRateLimitError) as exc:
+                client._request("GET", "/test")
+
+        mock_sleep.assert_called_once_with(7)
+        assert exc.value.retry_after == 7
+
+    def test_lowercase_dict_headers(self, client) -> None:
+        """Lowercase header names in a plain dict are still honoured."""
+        response = self._rate_limited({"x-ratelimit-reset": "9"})
+        with patch.object(client._http_client, "request", return_value=response), \
+                patch("strapkit.client.time.sleep") as mock_sleep:
+            with pytest.raises(WhoopRateLimitError) as exc:
+                client._request("GET", "/test")
+
+        mock_sleep.assert_called_once_with(9)
+        assert exc.value.retry_after == 9
+
+    def test_wait_is_capped_at_120_seconds(self, client) -> None:
+        """Long resets are capped at 2 minutes; the error reports the real value."""
+        response = self._rate_limited({"X-RateLimit-Reset": "500"})
+        with patch.object(client._http_client, "request", return_value=response) as mock_request, \
+                patch("strapkit.client.time.sleep") as mock_sleep:
+            with pytest.raises(WhoopRateLimitError) as exc:
+                client._request("GET", "/test")
+
+        mock_sleep.assert_called_once_with(120)
+        assert exc.value.retry_after == 500
+        assert mock_request.call_count == 2
+
+    def test_defaults_to_60_without_headers(self, client) -> None:
+        """Without rate limit headers the wait defaults to 60 seconds."""
+        response = self._rate_limited({})
+        with patch.object(client._http_client, "request", return_value=response), \
+                patch("strapkit.client.time.sleep") as mock_sleep:
+            with pytest.raises(WhoopRateLimitError) as exc:
+                client._request("GET", "/test")
+
+        mock_sleep.assert_called_once_with(60)
+        assert exc.value.retry_after == 60
+
+    def test_invalid_reset_falls_back_to_retry_after(self, client) -> None:
+        """A negative X-RateLimit-Reset is ignored in favour of Retry-After."""
+        response = self._rate_limited({"X-RateLimit-Reset": "-3", "Retry-After": "4"})
+        with patch.object(client._http_client, "request", return_value=response), \
+                patch("strapkit.client.time.sleep") as mock_sleep:
+            with pytest.raises(WhoopRateLimitError) as exc:
+                client._request("GET", "/test")
+
+        mock_sleep.assert_called_once_with(4)
+        assert exc.value.retry_after == 4
+
+    def test_real_httpx_headers_over_transport(self, client) -> None:
+        """End to end through httpx: real (case-insensitive) response headers are used."""
+        calls = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            calls.append(request)
+            if len(calls) == 1:
+                return httpx.Response(
+                    429, headers={"x-ratelimit-reset": "5", "retry-after": "30"}
+                )
+            return httpx.Response(200, json={"user_id": 1, "email": "a@b.com",
+                                             "first_name": "A", "last_name": "B"})
+
+        _install_mock_transport(client, handler)
+        with patch("strapkit.client.time.sleep") as mock_sleep:
+            profile = client.get_profile_basic()
+
+        assert isinstance(profile, UserProfileBasic)
+        mock_sleep.assert_called_once_with(5)
+        assert len(calls) == 2
+        assert str(calls[0].url) == "https://api.prod.whoop.com/developer/v2/user/profile/basic"
+
+
+# =============================================================================
+# Sleep For Cycle Tests (GET /developer/v2/cycle/{cycle_id}/sleep)
+# =============================================================================
+
+class TestSleepForCycle:
+    """Tests for get_sleep_for_cycle()."""
+
+    def test_get_sleep_for_cycle_path_and_parsing(self, client, sample_sleep_dict) -> None:
+        """Requests the cycle's sleep and parses it into a Sleep model."""
+        payload = dict(sample_sleep_dict, v1_id=93845)
+        with patch.object(
+            client._http_client, "request", return_value=_json_response(payload)
+        ) as mock_request:
+            sleep = client.get_sleep_for_cycle(100)
+
+        call_kwargs = mock_request.call_args.kwargs
+        assert call_kwargs["method"] == "GET"
+        assert call_kwargs["url"] == "/developer/v2/cycle/100/sleep"
+        assert isinstance(sleep, Sleep)
+        assert sleep.id == "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+        assert sleep.cycle_id == 100
+        assert sleep.v1_id == 93845
+
+    def test_get_sleep_for_cycle_without_v1_id(self, client, sample_sleep_dict) -> None:
+        """The deprecated v1_id is optional in the response."""
+        with patch.object(
+            client._http_client, "request", return_value=_json_response(sample_sleep_dict)
+        ):
+            sleep = client.get_sleep_for_cycle(100)
+
+        assert sleep.v1_id is None
+
+    @pytest.mark.parametrize("cycle_id", [0, -1])
+    def test_get_sleep_for_cycle_invalid_id(self, client, cycle_id) -> None:
+        """Non-positive cycle IDs are rejected before any HTTP call."""
+        with patch.object(client._http_client, "request") as mock_request:
+            with pytest.raises(ValueError, match="Invalid cycle_id"):
+                client.get_sleep_for_cycle(cycle_id)
+        mock_request.assert_not_called()
+
+    def test_get_sleep_for_cycle_not_found(self, client) -> None:
+        """A 404 (no sleep for the cycle) raises WhoopNotFoundError."""
+        mock_response = Mock()
+        mock_response.status_code = 404
+        mock_response.headers = {}
+        mock_response.text = "Not Found"
+        with patch.object(client._http_client, "request", return_value=mock_response):
+            with pytest.raises(WhoopNotFoundError):
+                client.get_sleep_for_cycle(100)
+
+
+# =============================================================================
+# Activity ID Mapping Tests (GET /developer/v1/activity-mapping/{id})
+# =============================================================================
+
+class TestActivityMapping:
+    """Tests for get_activity_mapping()."""
+
+    def test_get_activity_mapping_path_and_parsing(
+        self, client, sample_activity_mapping_dict
+    ) -> None:
+        """Requests the v1 mapping path and parses an ActivityIdMapping."""
+        with patch.object(
+            client._http_client,
+            "request",
+            return_value=_json_response(sample_activity_mapping_dict),
+        ) as mock_request:
+            mapping = client.get_activity_mapping(12345678)
+
+        call_kwargs = mock_request.call_args.kwargs
+        assert call_kwargs["method"] == "GET"
+        assert call_kwargs["url"] == "/developer/v1/activity-mapping/12345678"
+        assert isinstance(mapping, ActivityIdMapping)
+        assert mapping.v2_activity_id == "ecfc6a15-4661-442f-a9a4-f160dd7afae8"
+
+    def test_mapping_result_feeds_get_sleep(
+        self, client, sample_activity_mapping_dict, sample_sleep_dict
+    ) -> None:
+        """The mapped v2 UUID is accepted by get_sleep()."""
+        responses = [
+            _json_response(sample_activity_mapping_dict),
+            _json_response(sample_sleep_dict),
+        ]
+        with patch.object(
+            client._http_client, "request", side_effect=responses
+        ) as mock_request:
+            mapping = client.get_activity_mapping(93845)
+            client.get_sleep(mapping.v2_activity_id)
+
+        assert mock_request.call_args.kwargs["url"] == (
+            "/developer/v2/activity/sleep/ecfc6a15-4661-442f-a9a4-f160dd7afae8"
+        )
+
+    @pytest.mark.parametrize("activity_v1_id", [0, -5])
+    def test_get_activity_mapping_invalid_id(self, client, activity_v1_id) -> None:
+        """Non-positive v1 IDs are rejected before any HTTP call."""
+        with patch.object(client._http_client, "request") as mock_request:
+            with pytest.raises(ValueError, match="Invalid activity_v1_id"):
+                client.get_activity_mapping(activity_v1_id)
+        mock_request.assert_not_called()
+
+    def test_get_activity_mapping_not_found(self, client) -> None:
+        """An unknown v1 ID (404) raises WhoopNotFoundError."""
+        mock_response = Mock()
+        mock_response.status_code = 404
+        mock_response.headers = {}
+        mock_response.text = "Activity mapping not found"
+        with patch.object(client._http_client, "request", return_value=mock_response):
+            with pytest.raises(WhoopNotFoundError):
+                client.get_activity_mapping(1)
+
+
+# =============================================================================
+# Date Parameter Formatting Tests
+# =============================================================================
+
+class TestDateParamFormatting:
+    """Tests for _format_date_param() and collection start/end params."""
+
+    def test_date_only_string_expanded_to_midnight_utc(self, client) -> None:
+        """WHOOP v2 rejects date-only strings, so YYYY-MM-DD becomes a date-time."""
+        assert client._format_date_param("2024-01-15") == "2024-01-15T00:00:00.000Z"
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "2024-01-15T10:30:00.000Z",
+            "2024-01-15T10:30:00+00:00",
+            "2024-01-15T00:00:00Z",
+            "2024-1-5",
+            "20240115",
+            "2024-01-15 ",
+            "not-a-date",
+        ],
+    )
+    def test_other_strings_pass_through_unchanged(self, client, value) -> None:
+        """Any string that is not exactly YYYY-MM-DD is passed through as-is."""
+        assert client._format_date_param(value) == value
+
+    def test_none_returns_none(self, client) -> None:
+        assert client._format_date_param(None) is None
+
+    def test_aware_datetime_unchanged_behaviour(self, client) -> None:
+        dt = datetime(2024, 1, 15, 10, 30, tzinfo=timezone.utc)
+        assert client._format_date_param(dt) == "2024-01-15T10:30:00+00:00"
+
+    def test_naive_datetime_treated_as_utc(self, client) -> None:
+        assert client._format_date_param(datetime(2024, 1, 15, 10, 30)) == (
+            "2024-01-15T10:30:00+00:00"
+        )
+
+    def test_date_object_unchanged_behaviour(self, client) -> None:
+        assert client._format_date_param(date(2024, 1, 15)) == "2024-01-15T00:00:00+00:00"
+
+    def test_collection_request_sends_normalized_dates(self, client) -> None:
+        """Date-only start/end strings reach the API as full date-times."""
+        with patch.object(
+            client._http_client,
+            "request",
+            return_value=_json_response({"records": [], "next_token": None}),
+        ) as mock_request:
+            client.get_cycle_collection(start="2024-01-01", end="2024-01-31", limit=5)
+
+        params = mock_request.call_args.kwargs["params"]
+        assert params["start"] == "2024-01-01T00:00:00.000Z"
+        assert params["end"] == "2024-01-31T00:00:00.000Z"
+        assert params["limit"] == 5
+        assert mock_request.call_args.kwargs["url"] == "/developer/v2/cycle"
+
+
+# =============================================================================
+# Legacy v1 ID Rejection Tests
+# =============================================================================
+
+class TestLegacyIdRejection:
+    """get_sleep / get_workout reject legacy v1 integer IDs locally."""
+
+    @pytest.mark.parametrize("bad_id", [123, "12345678", " 42 "])
+    def test_get_sleep_rejects_v1_ids(self, client, bad_id) -> None:
+        with patch.object(client._http_client, "request") as mock_request:
+            with pytest.raises(ValueError, match="Invalid sleep_id") as exc:
+                client.get_sleep(bad_id)
+        assert "get_activity_mapping" in str(exc.value)
+        mock_request.assert_not_called()
+
+    @pytest.mark.parametrize("bad_id", [123, "12345678", " 42 "])
+    def test_get_workout_rejects_v1_ids(self, client, bad_id) -> None:
+        with patch.object(client._http_client, "request") as mock_request:
+            with pytest.raises(ValueError, match="Invalid workout_id") as exc:
+                client.get_workout(bad_id)
+        assert "get_activity_mapping" in str(exc.value)
+        mock_request.assert_not_called()
+
+    def test_get_sleep_rejects_whitespace(self, client) -> None:
+        with pytest.raises(ValueError, match="Invalid sleep_id"):
+            client.get_sleep("   ")
+
+    def test_get_workout_rejects_whitespace(self, client) -> None:
+        with pytest.raises(ValueError, match="Invalid workout_id"):
+            client.get_workout("   ")
+
+    def test_get_sleep_accepts_uuid_object(self, client, sample_sleep_dict) -> None:
+        """A uuid.UUID is used as its string form in the path."""
+        sleep_uuid = uuid.UUID("ecfc6a15-4661-442f-a9a4-f160dd7afae8")
+        with patch.object(
+            client._http_client, "request", return_value=_json_response(sample_sleep_dict)
+        ) as mock_request:
+            client.get_sleep(sleep_uuid)
+        assert mock_request.call_args.kwargs["url"] == (
+            "/developer/v2/activity/sleep/ecfc6a15-4661-442f-a9a4-f160dd7afae8"
+        )
+
+    def test_get_workout_accepts_uuid_object(self, client, sample_workout_dict) -> None:
+        """A uuid.UUID is used as its string form in the path."""
+        workout_uuid = uuid.UUID("ecfc6a15-4661-442f-a9a4-f160dd7afae8")
+        with patch.object(
+            client._http_client, "request", return_value=_json_response(sample_workout_dict)
+        ) as mock_request:
+            client.get_workout(workout_uuid)
+        assert mock_request.call_args.kwargs["url"] == (
+            "/developer/v2/activity/workout/ecfc6a15-4661-442f-a9a4-f160dd7afae8"
+        )
+
+    @pytest.mark.parametrize("bad_id", [None, 1.5, b"abc"])
+    def test_non_string_ids_get_no_legacy_hint(self, client, bad_id) -> None:
+        """Only int / all-digit IDs mention get_activity_mapping()."""
+        with pytest.raises(ValueError, match="Invalid sleep_id") as sleep_exc:
+            client.get_sleep(bad_id)
+        with pytest.raises(ValueError, match="Invalid workout_id") as workout_exc:
+            client.get_workout(bad_id)
+        assert "get_activity_mapping" not in str(sleep_exc.value)
+        assert "get_activity_mapping" not in str(workout_exc.value)
+
+
+# =============================================================================
+# v2 Model Parsing Through The Client
+# =============================================================================
+
+class TestV2ResponseParsing:
+    """v2-only fields parse correctly through the client methods."""
+
+    def test_get_cycle_parses_step_count(self, client, sample_cycle_dict) -> None:
+        payload = dict(sample_cycle_dict, step_count=8234)
+        with patch.object(
+            client._http_client, "request", return_value=_json_response(payload)
+        ) as mock_request:
+            cycle = client.get_cycle(999)
+
+        assert mock_request.call_args.kwargs["url"] == "/developer/v2/cycle/999"
+        assert cycle.step_count == 8234
+
+    def test_get_cycle_null_step_count(self, client, sample_cycle_dict) -> None:
+        with patch.object(
+            client._http_client, "request", return_value=_json_response(sample_cycle_dict)
+        ):
+            cycle = client.get_cycle(999)
+
+        assert cycle.step_count is None
+
+    def test_get_workout_full_v2_payload(self, client, sample_workout_dict) -> None:
+        """A full v2 workout (sport_name, zone_durations, v1_id) parses."""
+        with patch.object(
+            client._http_client, "request", return_value=_json_response(sample_workout_dict)
+        ):
+            workout = client.get_workout(sample_workout_dict["id"])
+
+        assert workout.sport_name == "yoga"
+        assert workout.v1_id == 1043
+        assert workout.score is not None
+        assert workout.score.zone_durations is not None
+        assert workout.score.zone_durations.zone_two_milli == 900000
+
+    def test_get_workout_without_sport_id(self, client, sample_workout_dict) -> None:
+        """WHOOP drops the deprecated sport_id and v1_id; the workout still parses."""
+        payload = dict(sample_workout_dict)
+        del payload["sport_id"]
+        del payload["v1_id"]
+        with patch.object(
+            client._http_client, "request", return_value=_json_response(payload)
+        ):
+            workout = client.get_workout(payload["id"])
+
+        assert workout.sport_id is None
+        assert workout.v1_id is None
+        assert workout.sport_name == "yoga"
+
+    def test_get_recovery_for_cycle_path(self, client, sample_recovery_dict) -> None:
+        with patch.object(
+            client._http_client, "request", return_value=_json_response(sample_recovery_dict)
+        ) as mock_request:
+            client.get_recovery_for_cycle(123)
+
+        assert mock_request.call_args.kwargs["url"] == "/developer/v2/cycle/123/recovery"
+
+    @pytest.mark.parametrize(
+        "method_name, expected_url",
+        [
+            ("get_recovery_collection", "/developer/v2/recovery"),
+            ("get_sleep_collection", "/developer/v2/activity/sleep"),
+            ("get_cycle_collection", "/developer/v2/cycle"),
+            ("get_workout_collection", "/developer/v2/activity/workout"),
+        ],
+    )
+    def test_collection_paths_are_v2(self, client, method_name, expected_url) -> None:
+        with patch.object(
+            client._http_client,
+            "request",
+            return_value=_json_response({"records": [], "next_token": None}),
+        ) as mock_request:
+            getattr(client, method_name)(limit=3, next_token="tok")
+
+        call_kwargs = mock_request.call_args.kwargs
+        assert call_kwargs["url"] == expected_url
+        assert call_kwargs["params"] == {"limit": 3, "nextToken": "tok"}
+
+    @pytest.mark.parametrize(
+        "method_name, expected_url",
+        [
+            ("get_profile_basic", "/developer/v2/user/profile/basic"),
+            ("get_body_measurement", "/developer/v2/user/measurement/body"),
+        ],
+    )
+    def test_user_paths_are_v2(self, client, method_name, expected_url) -> None:
+        payloads = {
+            "get_profile_basic": {"user_id": 1, "email": "a@b.com",
+                                  "first_name": "A", "last_name": "B"},
+            "get_body_measurement": {"height_meter": 1.8, "weight_kilogram": 80.0,
+                                     "max_heart_rate": 190},
+        }
+        with patch.object(
+            client._http_client, "request", return_value=_json_response(payloads[method_name])
+        ) as mock_request:
+            getattr(client, method_name)()
+
+        assert mock_request.call_args.kwargs["url"] == expected_url

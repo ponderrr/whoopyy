@@ -1,8 +1,8 @@
 """
-Targeted tests for whoopyy.exceptions to reach high coverage.
+Targeted tests for strapkit.exceptions to reach high coverage.
 """
 
-from whoopyy.exceptions import (
+from strapkit.exceptions import (
     WhoopAPIError,
     WhoopAuthError,
     WhoopError,

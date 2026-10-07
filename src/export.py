@@ -12,8 +12,8 @@ Features:
     - Sleep quality metrics
 
 Example:
-    >>> from whoopyy import WhoopClient
-    >>> from whoopyy.export import (
+    >>> from strapkit import WhoopClient
+    >>> from strapkit.export import (
     ...     export_recovery_csv,
     ...     export_sleep_csv,
     ...     analyze_recovery_trends,
@@ -32,6 +32,7 @@ Example:
 """
 
 import csv
+import os
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -56,12 +57,94 @@ MS_TO_HOURS = 1.0 / MS_PER_HOUR
 logger = get_logger(__name__)
 
 
-def _validate_export_path(filepath: Union[str, Path]) -> None:
-    """Validate that export path does not target sensitive system directories."""
-    resolved = Path(filepath).resolve()
-    _BLOCKED_PREFIXES = ("/etc", "/var", "/usr", "/bin", "/sbin", "/boot", "/proc", "/sys")
-    if any(str(resolved).startswith(p) for p in _BLOCKED_PREFIXES):
+# System locations that exports must never target. Compared against the fully
+# resolved path, so both spellings are listed where macOS symlinks them
+# (/etc -> /private/etc, /var -> /private/var).
+_PROTECTED_SYSTEM_DIRS = (
+    "/bin", "/boot", "/dev", "/etc", "/lib", "/lib64", "/Library", "/private/etc",
+    "/private/var", "/proc", "/sbin", "/sys", "/System", "/usr", "/var",
+)
+
+# Subtrees of the above that are legitimate user destinations: /usr/local, and
+# /private/var/folders (the per-user temp and cache root on macOS).
+_SYSTEM_DIR_EXCEPTIONS = ("/usr/local", "/private/var/folders")
+
+# Sensitive paths under the current user's home directory (files or directories).
+_PROTECTED_HOME_PATHS = (
+    ".ssh", ".gnupg", ".aws", ".config/gcloud", ".config/fish/config.fish",
+    ".bashrc", ".bash_profile", ".bash_login", ".bash_logout", ".profile",
+    ".zshrc", ".zshenv", ".zprofile", ".zlogin", ".zlogout", ".cshrc", ".tcshrc",
+)
+
+
+def _folded_parts(path: Union[str, Path]) -> tuple[str, ...]:
+    # Case-folded because macOS volumes are case-insensitive by default, so
+    # "/LIBRARY" and "/Private/Etc" name the same places as "/Library" and "/private/etc".
+    return tuple(part.casefold() for part in Path(path).parts)
+
+
+def _is_within(path: tuple[str, ...], root: Union[str, Path]) -> bool:
+    root_parts = _folded_parts(root)
+    return path[: len(root_parts)] == root_parts
+
+
+def _validate_export_path(filepath: Union[str, Path]) -> Path:
+    """Validate that an export destination is safe to write to.
+
+    The path is expanded (``~``) and fully resolved (symlinks, ``..``) before
+    any comparison, so aliases such as ``/etc`` -> ``/private/etc`` or a symlink
+    in the working directory cannot sidestep the checks. Raises ``ValueError``
+    if the resolved path is inside a protected system location, is a sensitive
+    file or directory under the current user's home (SSH/GPG/AWS/gcloud config,
+    shell rc files), or is an existing file that is not a regular file.
+
+    Only the current user's home is checked; ``/usr/local`` and the macOS
+    per-user temp directory remain writable.
+
+    Returns the resolved path. Callers must write to it rather than to the
+    argument, since only the resolved path is what was validated (``~`` is
+    never expanded by ``open()``).
+    """
+    try:
+        resolved = Path(filepath).expanduser().resolve()
+    except RuntimeError as exc:  # e.g. "~nosuchuser/x.csv"
+        raise ValueError(f"Cannot resolve export path {str(filepath)!r}: {exc}") from exc
+    parts = _folded_parts(resolved)
+
+    in_system_dir = any(_is_within(parts, d) for d in _PROTECTED_SYSTEM_DIRS)
+    if in_system_dir and not any(_is_within(parts, d) for d in _SYSTEM_DIR_EXCEPTIONS):
         raise ValueError(f"Cannot write to protected directory: {resolved.parent}")
+
+    try:
+        home = Path.home()
+    except (RuntimeError, KeyError):  # no HOME and no passwd entry (some containers)
+        home = None
+    if home is not None:
+        # Resolve each target too, so a symlinked ~/.ssh or ~/.zshrc stays protected.
+        for rel in _PROTECTED_HOME_PATHS:
+            if _is_within(parts, (home / rel).resolve()):
+                raise ValueError(f"Cannot write to protected location: {resolved}")
+
+    if resolved.exists() and not resolved.is_file():
+        raise ValueError(f"Cannot overwrite non-regular file: {resolved}")
+
+    return resolved
+
+
+def _open_export_file(path: Path, newline: Optional[str] = "") -> TextIO:
+    """Open a validated export path for text writing, refusing a symlink as the final component.
+
+    Equivalent to ``open(path, "w", newline=newline, encoding="utf-8")``, except that
+    where ``O_NOFOLLOW`` exists a symlink swapped in after validation raises
+    ``OSError`` instead of being followed. Parent directories are not covered.
+    """
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open(path, flags, 0o666)
+    try:
+        return os.fdopen(fd, "w", newline=newline, encoding="utf-8")
+    except Exception:
+        os.close(fd)
+        raise
 
 
 __all__ = [
@@ -156,6 +239,8 @@ class TrainingLoadTrends:
         workout_count: Total workout count.
         total_workout_minutes: Total workout duration.
         record_count: Total number of records analyzed.
+        average_daily_steps: Mean step count across scored cycles that
+            report steps (None if no cycle has step data).
     """
     
     total_strain: float
@@ -167,6 +252,7 @@ class TrainingLoadTrends:
     workout_count: int
     total_workout_minutes: float
     record_count: int
+    average_daily_steps: Optional[float] = None
 
 
 # =============================================================================
@@ -194,7 +280,7 @@ def export_recovery_csv(
         >>> count = export_recovery_csv(recoveries, "recovery.csv")
         >>> print(f"Exported {count} records")
     """
-    _validate_export_path(filepath)
+    filepath = _validate_export_path(filepath)
 
     if not recoveries:
         logger.warning("No recovery records to export")
@@ -214,7 +300,7 @@ def export_recovery_csv(
         extra={"filepath": str(filepath), "record_count": len(records)}
     )
     
-    with open(filepath, "w", newline="", encoding="utf-8") as f:
+    with _open_export_file(filepath) as f:
         writer = csv.writer(f)
         
         # Header row
@@ -289,7 +375,7 @@ def export_sleep_csv(
         >>> sleeps = client.get_all_sleep(max_records=30)
         >>> count = export_sleep_csv(sleeps, "sleep.csv", include_naps=False)
     """
-    _validate_export_path(filepath)
+    filepath = _validate_export_path(filepath)
 
     if not sleeps:
         logger.warning("No sleep records to export")
@@ -313,7 +399,7 @@ def export_sleep_csv(
         extra={"filepath": str(filepath), "record_count": len(records)}
     )
     
-    with open(filepath, "w", newline="", encoding="utf-8") as f:
+    with _open_export_file(filepath) as f:
         writer = csv.writer(f)
         
         # Header row
@@ -398,7 +484,7 @@ def export_cycle_csv(
     Returns:
         Number of records exported.
     """
-    _validate_export_path(filepath)
+    filepath = _validate_export_path(filepath)
 
     if not cycles:
         logger.warning("No cycle records to export")
@@ -417,7 +503,7 @@ def export_cycle_csv(
         extra={"filepath": str(filepath), "record_count": len(records)}
     )
     
-    with open(filepath, "w", newline="", encoding="utf-8") as f:
+    with _open_export_file(filepath) as f:
         writer = csv.writer(f)
         
         # Header row
@@ -430,10 +516,12 @@ def export_cycle_csv(
             "Max HR (bpm)",
             "Kilojoules",
             "Score State",
+            "Step Count",
         ])
         
         # Data rows
         for cycle in records:
+            step_count = cycle.step_count if cycle.step_count is not None else ""
             if cycle.score:
                 writer.writerow([
                     cycle.start.date().isoformat(),
@@ -444,6 +532,7 @@ def export_cycle_csv(
                     cycle.score.max_heart_rate,
                     f"{cycle.score.kilojoule:.1f}",
                     cycle.score_state,
+                    step_count,
                 ])
             else:
                 writer.writerow([
@@ -455,6 +544,7 @@ def export_cycle_csv(
                     "",
                     "",
                     cycle.score_state,
+                    step_count,
                 ])
     
     logger.info(f"Exported {len(records)} cycle records to {filepath}")
@@ -481,7 +571,7 @@ def export_workout_csv(
         >>> workouts = client.get_all_workouts(max_records=100)
         >>> count = export_workout_csv(workouts, "workouts.csv")
     """
-    _validate_export_path(filepath)
+    filepath = _validate_export_path(filepath)
 
     if not workouts:
         logger.warning("No workout records to export")
@@ -500,7 +590,7 @@ def export_workout_csv(
         extra={"filepath": str(filepath), "record_count": len(records)}
     )
     
-    with open(filepath, "w", newline="", encoding="utf-8") as f:
+    with _open_export_file(filepath) as f:
         writer = csv.writer(f)
         
         # Header row
@@ -524,6 +614,8 @@ def export_workout_csv(
         
         # Data rows
         for workout in records:
+            # sport_id is deprecated by WHOOP and may be absent in v2 responses
+            sport_id = workout.sport_id if workout.sport_id is not None else ""
             if workout.score:
                 distance_m = workout.score.distance_meter or 0
                 distance_km = distance_m / 1000 if distance_m else ""
@@ -533,7 +625,7 @@ def export_workout_csv(
                     workout.start.time().isoformat(),
                     workout.end.time().isoformat() if workout.end else "",
                     workout.sport_display_name,
-                    workout.sport_id,
+                    sport_id,
                     f"{workout.duration_minutes:.1f}" if workout.duration_minutes else "",
                     f"{workout.score.strain:.1f}",
                     workout.score.average_heart_rate,
@@ -551,7 +643,7 @@ def export_workout_csv(
                     workout.start.time().isoformat(),
                     workout.end.time().isoformat() if workout.end else "",
                     workout.sport_display_name,
-                    workout.sport_id,
+                    sport_id,
                     f"{workout.duration_minutes:.1f}" if workout.duration_minutes else "",
                     "",
                     "",
@@ -767,6 +859,10 @@ def analyze_training_load(
     )
     high_strain_days = sum(1 for s in strains if s >= high_strain_threshold)
     
+    # Step stats (step_count is None when WHOOP has no step data for a cycle)
+    step_counts = [c.step_count for c in scored_cycles if c.step_count is not None]
+    average_daily_steps = sum(step_counts) / len(step_counts) if step_counts else None
+
     # Workout stats
     workout_count = 0
     total_workout_minutes = 0.0
@@ -788,6 +884,7 @@ def analyze_training_load(
         workout_count=workout_count,
         total_workout_minutes=total_workout_minutes,
         record_count=len(scored_cycles),
+        average_daily_steps=average_daily_steps,
     )
 
 
@@ -811,9 +908,14 @@ def generate_summary_report(
         cycles: List of Cycle records.
         workouts: Optional list of Workout records.
         output: Output file path or file-like object. If None, returns string.
+            A path is validated like the CSV export destinations.
     
     Returns:
         The generated report as a string.
+    
+    Raises:
+        ValueError: If ``output`` is a path in a protected location or an
+            existing non-regular file.
     
     Example:
         >>> report = generate_summary_report(
@@ -821,6 +923,9 @@ def generate_summary_report(
         ...     output="report.txt"
         ... )
     """
+    if isinstance(output, (str, Path)):
+        output = _validate_export_path(output)
+
     lines: List[str] = []
     separator = "=" * 70
     subseparator = "-" * 70
@@ -883,6 +988,8 @@ def generate_summary_report(
         lines.append(f"Total Strain: {load_trends.total_strain:.1f}")
         lines.append(f"Average Daily Strain: {load_trends.average_daily_strain:.1f}")
         lines.append(f"Max Daily Strain: {load_trends.max_strain:.1f}")
+        if load_trends.average_daily_steps is not None:
+            lines.append(f"Average Daily Steps: {load_trends.average_daily_steps:,.0f}")
         lines.append("")
         lines.append("Strain Distribution:")
         lines.append(f"  Low (<10): {load_trends.low_strain_days} days")
@@ -936,7 +1043,7 @@ def generate_summary_report(
     # Output handling
     if output is not None:
         if isinstance(output, (str, Path)):
-            with open(output, "w", encoding="utf-8") as f:
+            with _open_export_file(output, newline=None) as f:
                 f.write(report)
             logger.info(f"Report saved to {output}")
         else:

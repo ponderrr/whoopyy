@@ -1,5 +1,5 @@
 """
-Targeted tests for whoopyy.models to reach high coverage.
+Targeted tests for strapkit.models to reach high coverage.
 
 Covers property methods on: BodyMeasurement, StageSummary, SleepNeeded,
 SleepScore, Cycle, WorkoutZoneDuration (all zone minutes), Workout,
@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from whoopyy.models import (
+from strapkit.models import (
     BodyMeasurement,
     Cycle,
     CycleCollection,
@@ -240,7 +240,8 @@ class TestWorkoutScoreProperties:
 class TestWorkoutProperties:
     """Cover sport_display_name, duration_hours, duration_minutes, is_scored."""
 
-    def _make_workout(self, sport_id=0, sport_name=None, score=None, score_state="PENDING_SCORE"):
+    def _make_workout(self, sport_name="running", sport_id=None, score=None,
+                      score_state="PENDING_SCORE"):
         return Workout(
             id="w-uuid-1",
             user_id=1,
@@ -249,23 +250,60 @@ class TestWorkoutProperties:
             start=datetime(2024, 1, 1, 10, 0, tzinfo=timezone.utc),
             end=datetime(2024, 1, 1, 11, 0, tzinfo=timezone.utc),
             timezone_offset="-05:00",
-            sport_id=sport_id,
             sport_name=sport_name,
+            sport_id=sport_id,
             score_state=score_state,
             score=score,
         )
 
     def test_sport_display_name_from_sport_name(self) -> None:
+        """A v2 sport_name is shown with its curated SPORT_NAMES label."""
         w = self._make_workout(sport_name="mountain_biking")
         assert w.sport_display_name == "Mountain Biking"
+        assert w.sport_name == "mountain_biking"  # raw value untouched
+
+    @pytest.mark.parametrize(
+        "name,expected",
+        [
+            ("hiit", "HIIT"),
+            ("HIIT", "HIIT"),
+            ("functional-fitness", "Functional Fitness"),
+            ("track_and_field", "Track And Field"),
+            ("operations-tactical", "Operations - Tactical"),
+            ("non-sleep-deep-rest", "Non Sleep Deep Rest"),
+            ("running", "Running"),
+            ("  weightlifting ", "Weightlifting"),
+        ],
+    )
+    def test_sport_display_name_formats_v2_names(self, name, expected) -> None:
+        """Known names use the curated label; others get capitalized words."""
+        w = self._make_workout(sport_name=name, sport_id=96)
+        assert w.sport_display_name == expected
+
+    def test_sport_display_name_prefers_sport_name_over_sport_id(self) -> None:
+        """sport_name (v2) wins over the deprecated sport_id."""
+        w = self._make_workout(sport_name="running", sport_id=44)
+        assert w.sport_display_name == "Running"
+
+    def test_sport_display_name_blank_sport_name_uses_id(self) -> None:
+        """A whitespace-only sport_name falls back to the deprecated sport_id."""
+        w = self._make_workout(sport_name="   ", sport_id=44)
+        assert w.sport_display_name == "Yoga"
 
     def test_sport_display_name_from_id(self) -> None:
-        w = self._make_workout(sport_id=44)
+        """With an empty sport_name, the deprecated sport_id is looked up."""
+        w = self._make_workout(sport_name="", sport_id=44)
         assert w.sport_display_name == "Yoga"
 
     def test_sport_display_name_unknown(self) -> None:
-        w = self._make_workout(sport_id=99999)
-        assert "Unknown" in w.sport_display_name
+        """An empty sport_name with an unknown sport_id names the ID."""
+        w = self._make_workout(sport_name="", sport_id=99999)
+        assert w.sport_display_name == "Unknown Sport (99999)"
+
+    def test_sport_display_name_no_sport_info(self) -> None:
+        """Neither sport_name nor sport_id gives 'Unknown'."""
+        w = self._make_workout(sport_name="", sport_id=None)
+        assert w.sport_display_name == "Unknown"
 
     def test_duration_hours(self) -> None:
         w = self._make_workout()

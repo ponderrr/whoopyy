@@ -1,5 +1,5 @@
 """
-Targeted tests for whoopyy.utils to reach high coverage.
+Targeted tests for strapkit.utils to reach high coverage.
 
 Covers: delete_tokens, calculate_expiry, milliseconds_to_hours,
         milliseconds_to_minutes, and error branches in save_tokens.
@@ -10,7 +10,7 @@ import time
 
 import pytest
 
-from whoopyy.utils import (
+from strapkit.utils import (
     calculate_expiry,
     delete_tokens,
     milliseconds_to_hours,

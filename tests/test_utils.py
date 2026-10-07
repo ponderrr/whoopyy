@@ -1,11 +1,12 @@
 """
-Unit tests for whoopyy utility functions.
+Unit tests for strapkit utility functions.
 
 Tests cover:
 - save_tokens: file creation, content correctness, file permissions
 - load_tokens: happy path, missing file, corrupted JSON
 - is_token_expired: expired/valid token detection
 - format_datetime / parse_datetime: ISO8601 round-trip
+- parse_rate_limit_reset: 429 wait time from WHOOP rate limit headers
 """
 
 import json
@@ -13,9 +14,10 @@ import os
 import time
 from datetime import datetime, timezone
 
+import httpx
 import pytest
 
-from whoopyy import utils
+from strapkit import utils
 
 
 # =============================================================================
@@ -212,3 +214,102 @@ class TestParseDatetime:
         """parse_datetime should raise ValueError for unparsable strings."""
         with pytest.raises((ValueError, Exception)):
             utils.parse_datetime("not-a-date")
+
+
+# =============================================================================
+# parse_rate_limit_reset Tests
+# =============================================================================
+
+class TestParseRateLimitReset:
+    """Tests for utils.parse_rate_limit_reset()."""
+
+    def test_exported_in_all(self):
+        """parse_rate_limit_reset is part of the public utils API."""
+        assert "parse_rate_limit_reset" in utils.__all__
+
+    def test_uses_x_ratelimit_reset(self):
+        """X-RateLimit-Reset (WHOOP's documented header) is used when present."""
+        assert utils.parse_rate_limit_reset({"X-RateLimit-Reset": "17"}) == 17
+
+    def test_x_ratelimit_reset_preferred_over_retry_after(self):
+        """X-RateLimit-Reset wins when both headers are present."""
+        headers = {"Retry-After": "30", "X-RateLimit-Reset": "7"}
+        assert utils.parse_rate_limit_reset(headers) == 7
+
+    def test_falls_back_to_retry_after(self):
+        """Retry-After is used when X-RateLimit-Reset is absent."""
+        assert utils.parse_rate_limit_reset({"Retry-After": "45"}) == 45
+
+    def test_falls_back_to_retry_after_when_reset_invalid(self):
+        """An invalid X-RateLimit-Reset falls through to a valid Retry-After."""
+        headers = {"X-RateLimit-Reset": "soon", "Retry-After": "12"}
+        assert utils.parse_rate_limit_reset(headers) == 12
+
+    def test_default_when_no_headers(self):
+        """With neither header, the default (60) is returned."""
+        assert utils.parse_rate_limit_reset({}) == 60
+
+    def test_custom_default(self):
+        """A caller-supplied default is returned when no header is usable."""
+        assert utils.parse_rate_limit_reset({}, default=5) == 5
+        assert utils.parse_rate_limit_reset({"Retry-After": "x"}, default=9) == 9
+
+    def test_zero_is_valid(self):
+        """Zero seconds is a valid non-negative wait."""
+        assert utils.parse_rate_limit_reset({"X-RateLimit-Reset": "0"}) == 0
+
+    def test_surrounding_whitespace_is_ignored(self):
+        """Header values with surrounding whitespace still parse."""
+        assert utils.parse_rate_limit_reset({"X-RateLimit-Reset": " 8 "}) == 8
+
+    @pytest.mark.parametrize(
+        "value",
+        ["-1", "-30", "1.5", "abc", "", "Wed, 21 Oct 2015 07:28:00 GMT", "1e3", "+5"],
+    )
+    def test_invalid_values_fall_back_to_default(self, value):
+        """Negative, decimal, empty and HTTP-date values are ignored."""
+        assert utils.parse_rate_limit_reset({"X-RateLimit-Reset": value}) == 60
+        assert utils.parse_rate_limit_reset({"Retry-After": value}) == 60
+
+    def test_invalid_values_in_both_headers_return_default(self):
+        """When both headers are invalid, the default is returned."""
+        headers = {"X-RateLimit-Reset": "-1", "Retry-After": "2.5"}
+        assert utils.parse_rate_limit_reset(headers, default=42) == 42
+
+    @pytest.mark.parametrize(
+        "name", ["x-ratelimit-reset", "X-RATELIMIT-RESET", "x-RateLimit-reset"]
+    )
+    def test_plain_dict_is_case_insensitive_for_reset(self, name):
+        """A plain dict with a differently cased X-RateLimit-Reset key is found."""
+        assert utils.parse_rate_limit_reset({name: "11"}) == 11
+
+    @pytest.mark.parametrize("name", ["retry-after", "RETRY-AFTER", "rEtRy-AfTeR"])
+    def test_plain_dict_is_case_insensitive_for_retry_after(self, name):
+        """A plain dict with a differently cased Retry-After key is found."""
+        assert utils.parse_rate_limit_reset({name: "22"}) == 22
+
+    def test_plain_dict_lowercase_reset_preferred_over_retry_after(self):
+        """Precedence holds even when the dict keys are lowercase."""
+        headers = {"retry-after": "30", "x-ratelimit-reset": "3"}
+        assert utils.parse_rate_limit_reset(headers) == 3
+
+    def test_httpx_headers(self):
+        """httpx.Headers (as on a real response) are supported."""
+        headers = httpx.Headers({"x-ratelimit-reset": "13", "retry-after": "40"})
+        assert utils.parse_rate_limit_reset(headers) == 13
+
+    def test_httpx_headers_retry_after_only(self):
+        """httpx.Headers with only Retry-After use it."""
+        headers = httpx.Headers({"Retry-After": "25"})
+        assert utils.parse_rate_limit_reset(headers) == 25
+
+    def test_httpx_response_headers(self):
+        """Headers taken from an httpx.Response are parsed case-insensitively."""
+        response = httpx.Response(429, headers={"X-RATELIMIT-RESET": "4"})
+        assert utils.parse_rate_limit_reset(response.headers) == 4
+
+    def test_returns_int(self):
+        """The result is always an int."""
+        result = utils.parse_rate_limit_reset({"X-RateLimit-Reset": "007"})
+        assert result == 7
+        assert isinstance(result, int)

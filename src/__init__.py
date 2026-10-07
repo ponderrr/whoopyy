@@ -1,10 +1,10 @@
 """
-WhoopYY - Complete Python SDK for Whoop API.
+strapkit - Unofficial Python SDK for the WHOOP API.
 
 A type-safe, robust Python client for accessing Whoop's developer API.
 
 Example:
-    >>> from whoopyy import WhoopClient
+    >>> from strapkit import WhoopClient
     >>> client = WhoopClient(
     ...     client_id="your_client_id",
     ...     client_secret="your_client_secret"
@@ -14,7 +14,7 @@ Example:
     >>> print(f"Hello, {profile.first_name}!")
 """
 
-__version__ = "0.3.1"
+__version__ = "0.4.0"
 __author__ = "Robert Ponder"
 
 # Exceptions
@@ -50,12 +50,16 @@ from .models import (
     CycleCollection,
     # Workout
     WorkoutZoneDuration,
+    ZoneDurations,
     WorkoutScore,
     Workout,
     WorkoutCollection,
+    # Activity ID Mapping
+    ActivityIdMapping,
     # Helpers
     format_duration,
     get_sport_name,
+    format_sport_name,
     SPORT_NAMES,
 )
 
@@ -123,12 +127,16 @@ __all__ = [
     "CycleCollection",
     # Workout Models
     "WorkoutZoneDuration",
+    "ZoneDurations",
     "WorkoutScore",
     "Workout",
     "WorkoutCollection",
+    # Activity ID Mapping Models
+    "ActivityIdMapping",
     # Helpers
     "format_duration",
     "get_sport_name",
+    "format_sport_name",
     "SPORT_NAMES",
     # Export utilities - Data classes
     "RecoveryTrends",

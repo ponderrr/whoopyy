@@ -1,10 +1,10 @@
 """
-Targeted tests for whoopyy.logger to reach high coverage.
+Targeted tests for strapkit.logger to reach high coverage.
 """
 
 import logging
 
-from whoopyy.logger import (
+from strapkit.logger import (
     _loggers,
     disable_logging,
     enable_logging,
@@ -17,17 +17,17 @@ class TestGetLogger:
     """Tests for get_logger()."""
 
     def test_returns_logger_instance(self) -> None:
-        lgr = get_logger("whoopyy.test.coverage1")
+        lgr = get_logger("strapkit.test.coverage1")
         assert isinstance(lgr, logging.Logger)
 
     def test_caches_logger(self) -> None:
-        lgr1 = get_logger("whoopyy.test.cache1")
-        lgr2 = get_logger("whoopyy.test.cache1")
+        lgr1 = get_logger("strapkit.test.cache1")
+        lgr2 = get_logger("strapkit.test.cache1")
         assert lgr1 is lgr2
 
     def test_creates_handler_when_no_parent_handlers(self) -> None:
         # Use a unique name to avoid cache
-        name = "whoopyy_handler_test_unique_abc123"
+        name = "strapkit_handler_test_unique_abc123"
         _loggers.pop(name, None)
         raw_lgr = logging.getLogger(name)
         raw_lgr.handlers.clear()
@@ -46,17 +46,54 @@ class TestGetLogger:
                 parent.handlers.extend(saved_handlers)
 
     def test_explicit_level_parameter(self) -> None:
-        name = "whoopyy.test.explicit_level"
+        name = "strapkit.test.explicit_level"
         _loggers.pop(name, None)
         lgr = get_logger(name, level=logging.WARNING)
         assert lgr.level == logging.WARNING
+
+
+class TestLogLevelEnvironment:
+    """STRAPKIT_LOG_LEVEL, and the deprecated WHOOPYY_LOG_LEVEL fallback."""
+
+    @staticmethod
+    def _fresh_logger(name: str) -> logging.Logger:
+        _loggers.pop(name, None)
+        try:
+            return get_logger(name)
+        finally:
+            _loggers.pop(name, None)
+
+    def test_strapkit_log_level_sets_level(self, monkeypatch) -> None:
+        monkeypatch.setenv("STRAPKIT_LOG_LEVEL", "warning")
+        monkeypatch.delenv("WHOOPYY_LOG_LEVEL", raising=False)
+        lgr = self._fresh_logger("strapkit.test.env_new")
+        assert lgr.level == logging.WARNING
+
+    def test_deprecated_whoopyy_log_level_is_fallback(self, monkeypatch) -> None:
+        monkeypatch.delenv("STRAPKIT_LOG_LEVEL", raising=False)
+        monkeypatch.setenv("WHOOPYY_LOG_LEVEL", "ERROR")
+        lgr = self._fresh_logger("strapkit.test.env_old")
+        assert lgr.level == logging.ERROR
+
+    def test_strapkit_log_level_wins_over_deprecated(self, monkeypatch) -> None:
+        monkeypatch.setenv("STRAPKIT_LOG_LEVEL", "DEBUG")
+        monkeypatch.setenv("WHOOPYY_LOG_LEVEL", "ERROR")
+        lgr = self._fresh_logger("strapkit.test.env_both")
+        assert lgr.level == logging.DEBUG
+
+    def test_empty_or_unknown_level_means_info(self, monkeypatch) -> None:
+        monkeypatch.setenv("STRAPKIT_LOG_LEVEL", "")
+        monkeypatch.delenv("WHOOPYY_LOG_LEVEL", raising=False)
+        assert self._fresh_logger("strapkit.test.env_empty").level == logging.INFO
+        monkeypatch.setenv("STRAPKIT_LOG_LEVEL", "LOUD")
+        assert self._fresh_logger("strapkit.test.env_unknown").level == logging.INFO
 
 
 class TestSetLogLevel:
     """Tests for set_log_level()."""
 
     def test_changes_all_cached_loggers(self) -> None:
-        lgr = get_logger("whoopyy.test.setlevel1")
+        lgr = get_logger("strapkit.test.setlevel1")
         set_log_level(logging.CRITICAL)
         assert lgr.level == logging.CRITICAL
         # Check handler levels too
@@ -70,7 +107,7 @@ class TestDisableEnableLogging:
     """Tests for disable_logging() / enable_logging()."""
 
     def test_disable_then_enable(self) -> None:
-        lgr = get_logger("whoopyy.test.disable1")
+        lgr = get_logger("strapkit.test.disable1")
         disable_logging()
         assert lgr.disabled is True
         enable_logging()

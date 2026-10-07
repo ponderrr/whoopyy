@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Data export and analysis example for WhoopYY SDK.
+Data export and analysis example for the strapkit SDK.
 
 Demonstrates:
 - Exporting data to CSV files
@@ -22,7 +22,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from whoopyy import (
+from strapkit import (
     WhoopClient,
     export_recovery_csv,
     export_sleep_csv,
@@ -131,6 +131,9 @@ def analyze_trends(recoveries, sleeps, cycles, workouts) -> None:
         print(f"   Total Strain (period): {load_trends.total_strain:.1f}")
         print(f"   Average Daily Strain: {load_trends.average_daily_strain:.1f}")
         print(f"   Max Daily Strain: {load_trends.max_strain:.1f}")
+        # Step data comes from Cycle.step_count (None when WHOOP has none)
+        if load_trends.average_daily_steps is not None:
+            print(f"   Average Daily Steps: {load_trends.average_daily_steps:,.0f}")
         print(f"\n   Strain Distribution:")
         print(f"      Low (<10): {load_trends.low_strain_days} days")
         print(f"      Moderate (10-14): {load_trends.moderate_strain_days} days")
@@ -182,7 +185,7 @@ def main() -> None:
         sys.exit(1)
     
     print("=" * 60)
-    print("WhoopYY Data Export Example")
+    print("strapkit Data Export Example")
     print(f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
     print("=" * 60)
     

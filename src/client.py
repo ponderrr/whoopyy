@@ -1,9 +1,9 @@
 """
 Main Whoop API client.
 
-This module provides the primary interface for interacting with the Whoop API.
-It handles authentication, request management, and data retrieval for all
-supported endpoints.
+This module provides the primary interface for interacting with the Whoop API
+(WHOOP Developer API v2). It handles authentication, request management, and
+data retrieval for all supported endpoints.
 
 Features:
     - Automatic OAuth token management
@@ -13,7 +13,7 @@ Features:
     - Context manager support for resource cleanup
 
 Example:
-    >>> from whoopyy import WhoopClient
+    >>> from strapkit import WhoopClient
     >>> 
     >>> # Initialize and authenticate
     >>> client = WhoopClient(
@@ -39,7 +39,9 @@ Context Manager:
 """
 
 import logging
+import re
 import time
+import uuid
 
 from datetime import date, datetime
 from types import TracebackType
@@ -52,7 +54,6 @@ from . import __version__
 from .auth import OAuthHandler
 from .constants import (
     API_BASE_URL,
-    AUTH_BASE_URL,
     DEFAULT_TIMEOUT_SECONDS,
     DEFAULT_TOKEN_FILE,
     ENDPOINTS,
@@ -68,6 +69,7 @@ from .exceptions import (
 )
 from .logger import get_logger
 from .models import (
+    ActivityIdMapping,
     BodyMeasurement,
     Cycle,
     CycleCollection,
@@ -79,11 +81,18 @@ from .models import (
     Workout,
     WorkoutCollection,
 )
-from .utils import _sanitize_error_response, format_datetime
+from .utils import (
+    _sanitize_error_response,
+    format_datetime,
+    parse_rate_limit_reset,
+)
 
 logger = get_logger(__name__)
 
 __all__ = ["WhoopClient"]
+
+_DATE_ONLY_PATTERN = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
+"""Matches a date-only string (YYYY-MM-DD), which WHOOP v2 rejects for start/end."""
 
 
 class WhoopClient:
@@ -126,6 +135,7 @@ class WhoopClient:
         scope: Optional[List[str]] = None,
         token_file: str = DEFAULT_TOKEN_FILE,
         timeout: float = DEFAULT_TIMEOUT_SECONDS,
+        use_pkce: bool = False,
     ) -> None:
         """
         Initialize Whoop API client.
@@ -136,7 +146,10 @@ class WhoopClient:
             redirect_uri: OAuth callback URI. Must match portal configuration.
             scope: List of OAuth scopes. Defaults to all available scopes.
             token_file: Path for storing authentication tokens.
-            timeout: HTTP request timeout in seconds.
+            timeout: HTTP request timeout in seconds, for API and token
+                     requests (connecting to the API is capped at 5 seconds).
+            use_pkce: Send a PKCE (S256) challenge during authenticate().
+                      Defaults to False.
         
         Raises:
             ValueError: If client_id or client_secret is empty.
@@ -166,12 +179,17 @@ class WhoopClient:
             scope=scope,
             token_file=token_file,
             timeout=timeout,
+            use_pkce=use_pkce,
         )
         
         # HTTP client for API requests with connection pooling
         self._http_client = httpx.Client(
             base_url=API_BASE_URL,
-            timeout=httpx.Timeout(connect=5.0, read=30.0, write=10.0, pool=5.0),
+            # Honour the caller's timeout, with connecting capped at 5s. None
+            # (accepted before) removes only the read, write and pool limits.
+            timeout=httpx.Timeout(
+                timeout, connect=5.0 if timeout is None else min(5.0, timeout)
+            ),
             limits=httpx.Limits(
                 max_connections=10,
                 max_keepalive_connections=5,
@@ -180,7 +198,7 @@ class WhoopClient:
             headers={
                 "Accept": "application/json",
                 "Content-Type": "application/json",
-                "User-Agent": f"whoopyy/{__version__}",
+                "User-Agent": f"strapkit/{__version__}",
             },
         )
         
@@ -196,16 +214,24 @@ class WhoopClient:
     # Authentication
     # =========================================================================
     
-    def authenticate(self, auto_open_browser: bool = True) -> None:
+    def authenticate(self, auto_open_browser: bool = True, force: bool = False) -> None:
         """
         Perform OAuth authentication flow.
         
         Opens browser for user to authorize the application. After successful
-        authorization, tokens are stored for future use.
+        authorization, tokens are stored for future use. If usable tokens
+        are already stored (an unexpired access token, or a refresh token),
+        the browser flow is skipped unless ``force`` is True.
+
+        When WHOOP rejects the stored refresh token, the SDK clears the
+        stored tokens and raises WhoopTokenError, so calling authenticate()
+        afterwards runs the browser flow again.
         
         Args:
             auto_open_browser: Whether to automatically open browser.
                               Set to False for headless environments.
+            force: Run the browser flow even if tokens are already stored,
+                   e.g. to switch accounts or re-consent to new scopes.
         
         Raises:
             WhoopAuthError: If authentication fails or is denied.
@@ -224,19 +250,28 @@ class WhoopClient:
         logger.info("Starting authentication")
         
         # Check if we already have valid tokens
-        if self.auth.has_valid_tokens():
+        if not force and self.auth.has_valid_tokens():
             logger.info("Found existing valid tokens, skipping OAuth flow")
             self._authenticated = True
             return
+
+        if force:
+            logger.info("Forced re-authentication, running OAuth flow")
         
         self.auth.authorize(auto_open_browser=auto_open_browser)
         self._authenticated = True
+        # Cached responses may belong to a previously authorized account
+        self._cache.clear()
         
         logger.info("Authentication successful")
     
     def is_authenticated(self) -> bool:
         """
         Check if client has valid authentication.
+
+        Reflects the stored tokens, not whether authenticate() was called:
+        after logout(), revoke_access() or a rejected refresh token (which
+        clears the stored tokens) this returns False.
         
         Returns:
             True if authenticated with valid (or refreshable) tokens.
@@ -245,7 +280,30 @@ class WhoopClient:
             >>> if not client.is_authenticated():
             ...     client.authenticate()
         """
-        return self._authenticated or self.auth.has_valid_tokens()
+        return self.auth.has_valid_tokens()
+
+    def logout(self) -> None:
+        """
+        Sign out locally: forget the stored tokens and cached responses.
+
+        Clears the in-memory tokens, deletes the token file at
+        ``auth.token_file`` and clears the response cache, so
+        ``is_authenticated()`` returns False and the next ``authenticate()``
+        runs the OAuth flow again. WHOOP is not contacted, so the grant stays
+        valid on WHOOP's side; use ``revoke_access()`` to revoke it remotely.
+
+        Example:
+            >>> client.logout()
+            >>> client.authenticate()  # opens the browser again
+        """
+        self._forget_session()
+        logger.info("Logged out")
+
+    def _forget_session(self) -> None:
+        """Clear stored tokens (memory and file), auth state and the cache."""
+        self.auth.clear_tokens()
+        self._authenticated = False
+        self._cache.clear()
     
     # =========================================================================
     # Internal Request Methods
@@ -281,7 +339,7 @@ class WhoopClient:
         
         Args:
             method: HTTP method (GET, POST, DELETE, etc.).
-            endpoint: API endpoint path (e.g., "/developer/v1/recovery").
+            endpoint: API endpoint path (e.g., "/developer/v2/recovery").
             params: Query parameters for the request.
             data: JSON body data for POST/PUT requests.
         
@@ -295,6 +353,9 @@ class WhoopClient:
         """
         try:
             headers = self._get_auth_headers()
+            # Remember which token this request used: on a 401, refresh only
+            # if no other thread or process has replaced it already.
+            used_token = headers["Authorization"].partition(" ")[2]
             
             if logger.isEnabledFor(logging.DEBUG):
                 logger.debug(
@@ -332,11 +393,7 @@ class WhoopClient:
 
             # Handle rate limiting (429)
             if response.status_code == 429:
-                retry_after_header = response.headers.get("Retry-After", "60")
-                try:
-                    retry_after = int(retry_after_header)
-                except ValueError:
-                    retry_after = 60
+                retry_after = parse_rate_limit_reset(response.headers)
 
                 if not _retry:
                     logger.warning(
@@ -360,9 +417,9 @@ class WhoopClient:
                         f"Status: 401. Response: {_sanitize_error_response(response.text)}",
                         status_code=401,
                     )
-                # Force refresh and retry once
+                # Refresh (unless someone already did) and retry once
                 logger.warning("Authentication failed - refreshing token and retrying")
-                self.auth.refresh_access_token()
+                self.auth.refresh_if_stale(used_token)
                 return self._request(method, endpoint, params=params, data=data, _retry=True)
 
             # Handle not found errors
@@ -436,12 +493,22 @@ class WhoopClient:
     ) -> Optional[str]:
         """
         Format date parameter for API request.
-        
+
+        WHOOP v2 declares ``start`` and ``end`` as ``date-time`` and rejects
+        date-only strings, so a string of exactly ``YYYY-MM-DD`` is expanded
+        to midnight UTC (``YYYY-MM-DDT00:00:00.000Z``). Naive datetimes and
+        ``date`` objects are treated as UTC. Any other string is passed
+        through unchanged.
+
         Args:
             value: Date as datetime, date, or ISO string.
-        
+
         Returns:
             ISO 8601 formatted string or None.
+
+        Example:
+            >>> client._format_date_param("2024-01-15")
+            '2024-01-15T00:00:00.000Z'
         """
         if value is None:
             return None
@@ -450,8 +517,10 @@ class WhoopClient:
             return format_datetime(value)
         elif isinstance(value, date):
             return format_datetime(datetime.combine(value, datetime.min.time()))
+        elif _DATE_ONLY_PATTERN.fullmatch(value):
+            return f"{value}T00:00:00.000Z"
         else:
-            return value  # Assume already formatted string
+            return value  # Assume already formatted date-time string
 
     def _build_collection_params(
         self,
@@ -577,7 +646,7 @@ class WhoopClient:
         
         Args:
             start: Start date/datetime for filtering (inclusive).
-            end: End date/datetime for filtering (inclusive).
+            end: End date/datetime for filtering (exclusive).
             limit: Number of records per page (1-25). Defaults to 25.
             next_token: Pagination token from previous response.
         
@@ -729,27 +798,39 @@ class WhoopClient:
     # Sleep Methods
     # =========================================================================
     
-    def get_sleep(self, sleep_id: str) -> Sleep:
+    def get_sleep(self, sleep_id: Union[str, uuid.UUID]) -> Sleep:
         """
         Get specific sleep record by ID.
 
         Args:
-            sleep_id: Sleep record UUID string.
+            sleep_id: Sleep record UUID, as a string or ``uuid.UUID``. To
+                look up the UUID for a legacy v1 integer sleep ID, use
+                get_activity_mapping().
 
         Returns:
             Sleep record with score and metadata.
 
         Raises:
             WhoopAPIError: If request fails or sleep not found.
-            ValueError: If sleep_id is invalid.
+            ValueError: If sleep_id is empty or is a legacy v1 integer ID.
 
         Example:
-            >>> sleep = client.get_sleep("abc-123")
+            >>> sleep = client.get_sleep("ecfc6a15-4661-442f-a9a4-f160dd7afae8")
             >>> print(f"Duration: {sleep.duration_hours}h")
             >>> if sleep.score:
             ...     print(f"Performance: {sleep.score.sleep_performance_percentage}%")
         """
-        if not sleep_id or not sleep_id.strip():
+        if isinstance(sleep_id, uuid.UUID):
+            sleep_id = str(sleep_id)
+        if isinstance(sleep_id, int) or (
+            isinstance(sleep_id, str) and sleep_id.strip().isdigit()
+        ):
+            raise ValueError(
+                f"Invalid sleep_id: {sleep_id!r}. WHOOP v2 sleep IDs are UUID "
+                "strings; use get_activity_mapping() to look up the UUID for a "
+                "legacy v1 integer ID."
+            )
+        if not isinstance(sleep_id, str) or not sleep_id.strip():
             raise ValueError(f"Invalid sleep_id: {sleep_id!r}")
         
         logger.info(
@@ -761,6 +842,38 @@ class WhoopClient:
         data = self._request("GET", endpoint)
         return Sleep(**data)
     
+    def get_sleep_for_cycle(self, cycle_id: int) -> Sleep:
+        """
+        Get the sleep record for a specific cycle.
+
+        Args:
+            cycle_id: Cycle ID to get sleep for.
+
+        Returns:
+            Sleep record with score and metadata.
+
+        Raises:
+            WhoopAPIError: If request fails or sleep not found.
+            ValueError: If cycle_id is invalid.
+
+        Example:
+            >>> sleep = client.get_sleep_for_cycle(93845)
+            >>> print(f"Duration: {sleep.duration_hours}h")
+            >>> if sleep.score:
+            ...     print(f"Performance: {sleep.score.sleep_performance_percentage}%")
+        """
+        if cycle_id <= 0:
+            raise ValueError(f"Invalid cycle_id: {cycle_id}")
+
+        logger.info(
+            "Fetching sleep for cycle",
+            extra={"cycle_id": cycle_id}
+        )
+
+        endpoint = ENDPOINTS["sleep_for_cycle"].format(cycle_id=cycle_id)
+        data = self._request("GET", endpoint)
+        return Sleep(**data)
+
     def get_sleep_collection(
         self,
         start: Optional[Union[datetime, date, str]] = None,
@@ -908,7 +1021,7 @@ class WhoopClient:
         Example:
             >>> cycle = client.get_cycle(123456)
             >>> if cycle.score:
-            ...     print(f"Strain: {cycle.score.score}")
+            ...     print(f"Strain: {cycle.score.strain}")
             ...     print(f"Calories: {cycle.score.calories}")
         """
         if cycle_id <= 0:
@@ -947,7 +1060,7 @@ class WhoopClient:
             >>> for cycle in cycles.records:
             ...     if cycle.score:
             ...         level = cycle.score.strain_level
-            ...         print(f"Strain: {cycle.score.score} ({level})")
+            ...         print(f"Strain: {cycle.score.strain} ({level})")
         """
         if limit < 1 or limit > MAX_PAGE_LIMIT:
             raise WhoopValidationError(
@@ -1046,24 +1159,40 @@ class WhoopClient:
     # Workout Methods
     # =========================================================================
     
-    def get_workout(self, workout_id: str) -> Workout:
+    def get_workout(self, workout_id: Union[str, uuid.UUID]) -> Workout:
         """
         Get specific workout by ID.
 
         Args:
-            workout_id: Workout UUID string.
+            workout_id: Workout UUID, as a string or ``uuid.UUID``. To
+                look up the UUID for a legacy v1 integer workout ID, use
+                get_activity_mapping().
 
         Returns:
             Workout record with score and metadata.
 
+        Raises:
+            WhoopAPIError: If request fails or workout not found.
+            ValueError: If workout_id is empty or is a legacy v1 integer ID.
+
         Example:
-            >>> workout = client.get_workout("abc-123")
+            >>> workout = client.get_workout("ecfc6a15-4661-442f-a9a4-f160dd7afae8")
             >>> print(f"{workout.sport_name}: {workout.duration_minutes:.0f}min")
             >>> if workout.score:
             ...     print(f"Strain: {workout.score.strain}")
             ...     print(f"Calories: {workout.score.calories}")
         """
-        if not workout_id or not workout_id.strip():
+        if isinstance(workout_id, uuid.UUID):
+            workout_id = str(workout_id)
+        if isinstance(workout_id, int) or (
+            isinstance(workout_id, str) and workout_id.strip().isdigit()
+        ):
+            raise ValueError(
+                f"Invalid workout_id: {workout_id!r}. WHOOP v2 workout IDs are "
+                "UUID strings; use get_activity_mapping() to look up the UUID "
+                "for a legacy v1 integer ID."
+            )
+        if not isinstance(workout_id, str) or not workout_id.strip():
             raise ValueError(f"Invalid workout_id: {workout_id!r}")
         
         logger.info(
@@ -1195,43 +1324,80 @@ class WhoopClient:
             next_token = collection.next_token
     
     # =========================================================================
+    # Activity ID Mapping
+    # =========================================================================
+
+    def get_activity_mapping(self, activity_v1_id: int) -> ActivityIdMapping:
+        """
+        Look up the v2 UUID for a legacy v1 sleep or workout ID.
+
+        WHOOP v2 identifies sleeps and workouts by UUID string, while the
+        retired v1 API used integers. Use this to migrate stored v1 IDs.
+
+        Args:
+            activity_v1_id: Legacy v1 integer ID of a sleep or workout.
+
+        Returns:
+            ActivityIdMapping with the activity's v2 UUID (v2_activity_id).
+
+        Raises:
+            WhoopNotFoundError: If no mapping exists for the ID.
+            WhoopAPIError: If request fails.
+            ValueError: If activity_v1_id is invalid.
+
+        Example:
+            >>> mapping = client.get_activity_mapping(12345678)
+            >>> print(f"v2 ID: {mapping.v2_activity_id}")
+            >>> sleep = client.get_sleep(mapping.v2_activity_id)
+        """
+        if activity_v1_id <= 0:
+            raise ValueError(f"Invalid activity_v1_id: {activity_v1_id}")
+
+        logger.info(
+            "Fetching activity ID mapping",
+            extra={"activity_v1_id": activity_v1_id}
+        )
+
+        endpoint = ENDPOINTS["activity_mapping"].format(activity_v1_id=activity_v1_id)
+        data = self._request("GET", endpoint)
+        return ActivityIdMapping(**data)
+
+    # =========================================================================
     # Access Management
     # =========================================================================
     
     def revoke_access(self) -> None:
         """
-        Revoke current access token.
-        
-        This will:
-        - Invalidate the current access token
-        - Stop webhook delivery if configured
-        - Require re-authentication for future API calls
-        
+        Revoke the user's OAuth access for this application.
+
+        Sends ``DELETE /developer/v2/user/access`` with the current access
+        token. On success this will:
+        - Invalidate the access token granted by the user
+        - Stop webhook delivery for this user if configured
+        - Clear the in-memory tokens, delete the token file at
+          ``auth.token_file`` and clear the response cache, so
+          ``is_authenticated()`` returns False and the next
+          ``authenticate()`` runs the OAuth flow again
+
+        If the request fails, the tokens, token file and cache are kept.
+
+        Raises:
+            WhoopAuthError: If not authenticated or authorization fails.
+            WhoopRateLimitError: If rate limited (429).
+            WhoopAPIError: If the revocation request fails.
+
         Example:
             >>> client.revoke_access()
             >>> # User must re-authenticate to continue
         """
         logger.info("Revoking access token")
 
-        token = self.auth.get_valid_token()
-        revoke_url = f"{AUTH_BASE_URL}/oauth2/revoke"
+        self._request("DELETE", ENDPOINTS["user_access"])
 
-        response = self._http_client.post(
-            revoke_url,
-            data={"token": token},
-            headers={
-                "Content-Type": "application/x-www-form-urlencoded",
-            },
-        )
-
-        if response.status_code != 200:
-            raise WhoopAuthError(
-                f"Token revocation failed with status {response.status_code}: {_sanitize_error_response(response.text)}",
-                status_code=response.status_code,
-            )
-
-        self.auth._tokens = None
-        self._authenticated = False
+        # The revoked tokens would otherwise be reloaded from disk by
+        # has_valid_tokens()/get_valid_token(), and cached responses belong
+        # to the user who just revoked access.
+        self._forget_session()
 
         logger.info("Access token revoked")
 

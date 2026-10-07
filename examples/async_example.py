@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Async usage example for WhoopYY SDK.
+Async usage example for the strapkit SDK.
 
 Demonstrates:
 - Using AsyncWhoopClient for concurrent requests
@@ -22,7 +22,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from whoopyy import AsyncWhoopClient
+from strapkit import AsyncWhoopClient
 
 
 async def fetch_all_data_concurrently(client: AsyncWhoopClient) -> None:
@@ -90,7 +90,7 @@ async def main() -> None:
         sys.exit(1)
     
     print("=" * 60)
-    print("WhoopYY Async Usage Example")
+    print("strapkit Async Usage Example")
     print("=" * 60)
     
     # Use async context manager

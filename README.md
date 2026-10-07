@@ -822,7 +822,7 @@ whoopyy/
 │   ├── utils.py             # Token I/O, datetime helpers
 │   ├── logger.py            # Structured logging config
 │   └── type_defs.py         # TypedDict definitions
-├── tests/                   # 360+ tests, 90% coverage
+├── tests/                   # 1,000+ tests, ~96% coverage
 ├── examples/                # Usage examples
 ├── setup.py
 └── pyproject.toml

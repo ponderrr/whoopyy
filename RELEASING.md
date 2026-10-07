@@ -18,7 +18,7 @@ As of 2026-10-06:
 | Publish workflow | Has never run. It was added in `2555601`, after `v0.3.1` was tagged |
 | GitHub environments | None. `testpypi` and `pypi` still need to be created ([1.3](#13-create-the-github-environments)) |
 | Branch protection | `main` is not protected. The last two CI runs on `main` (2026-03-15) failed under the old `ci.yml`, which `release/0.4.0` replaces |
-| Tests | 895 collected: 871 pass and 24 skip (Python 3.9 and 3.13). The 24 skips are `tests/integration/test_real_api.py`, which needs real WHOOP credentials. CI runs Python 3.9 to 3.13, enforces 90% coverage and runs `mypy --strict` |
+| Tests | 1,074 collected: 1,050 pass and 24 skip on Python 3.9, 3.10, 3.11, 3.12 and 3.13 (~96% coverage). The 24 skips are `tests/integration/test_real_api.py`, which needs real WHOOP credentials. CI runs Python 3.9 to 3.13, enforces 90% coverage and runs `mypy --strict` |
 | Package build | `python -m build` plus `twine check` pass. The wheel contains `whoopyy/py.typed`, and mypy picks up its types from an installed copy (checked locally on 2026-10-06) |
 | License | GPL-3.0-only |
 
@@ -257,7 +257,6 @@ gh pr checks release/0.4.0 --repo ponderrr/whoopyy --watch
   - The heading reads `## [0.4.0] - 2026-10-06`. If you release on another day, change the
     date, and change the README link `CHANGELOG.md#040---2026-10-06` (in the "Upgrading from
     0.2.x / 0.3.x?" note) to match.
-  - The README's project-structure tree still says "360+ tests, 90% coverage".
   - PyPI shows `README.md` as the project page. Relative links (`CHANGELOG.md`, `LICENSE`) and
     Mermaid diagrams don't work there. You'll see the rendered page on TestPyPI in
     [3.4](#34-watch-the-run-and-approve) before you approve the PyPI upload.

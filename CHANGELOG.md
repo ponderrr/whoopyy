@@ -156,7 +156,7 @@ WHOOP's v2 OpenAPI spec. Everyone on 0.2.0–0.3.1 should upgrade.
 ### Added
 - `AsyncWhoopClient.fetch_all()` — fetch all data types concurrently with `asyncio.gather()`
 - `AsyncWhoopClient.fetch_dashboard()` — fetch latest single record of each type concurrently
-- Comprehensive integration test suite verified against real WHOOP credentials (17 tests)
+- Integration test suite against the real WHOOP API (20 tests, skipped without credentials). Correction: this entry originally said the suite was "verified against real WHOOP credentials"; it had not been run. Use `scripts/live_check.py` (0.4.0) to verify against your own account
 - `scripts/perf_check.py` for async performance sanity checks
 
 ### Fixed
